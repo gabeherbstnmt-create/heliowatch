@@ -2449,6 +2449,9 @@ function teamHTML() {
     '<label>Role<select name="role">' + ['viewer', 'operator', 'admin'].map(function (r) { return '<option value="' + r + '">' + ROLE_WORD[r] + ' — ' + ROLE_HINT[r] + '</option>'; }).join('') + '</select></label>' +
     '<label class="chk"><input type="checkbox" name="sms" checked> Text them alerts</label>' +
     '<div class="trj-row"><button class="btn primary" type="submit"' + (ACCT.busy ? ' disabled' : '') + '>Add member</button></div></form></div>';
+  /* team-wide test: a real (test) alert, delivered on each member's channels */
+  if (!demo && mg) h += '<div class="card"><h3>Test the whole team</h3><p class="cap">Sends a test alert to all ' + ACCT.roster.length + ' members on the channels each one chose, exactly as a real fault would. Results show under Recent alerts sent. Once every 5 minutes.</p>' +
+    '<div class="trj-row"><button class="btn primary" id="teamTest"' + (ACCT.busy ? ' disabled' : '') + '>Send test to everyone</button><button class="btn" id="refreshLog">Refresh results</button></div></div>';
   /* console data for the published site */
   if (!demo && mg && window.HW_SITES && !window.HW_PUBLIC) h += '<div class="card"><h3>Console data for the website</h3><p class="cap">The published site holds no tracker data; members download it after signing in. Upload this console’s telemetry and 3D model so they can.</p>' +
     '<div class="trj-row"><button class="btn primary" id="pushData"' + (ACCT.busy ? ' disabled' : '') + '>Upload console data</button></div></div>';
@@ -2486,6 +2489,13 @@ function bindTeam(host) {
       if (r.error) { var m = r.error.message; try { m = (await r.error.context.json()).error || m; } catch (x) {} return { error: { message: m } }; } return r; }, 'Test sent to your chosen channels. The result for each is under Recent alerts sent.');
   };
   var so = $('signOut'); if (so) so.onclick = function () { sb.auth.signOut(); };
+  var tt2 = $('teamTest'); if (tt2) tt2.onclick = function () {
+    if (!confirm('Send a test alert to all ' + ACCT.roster.length + ' team members now?')) return;
+    acctRun(async function () { var r = await sb.functions.invoke('notify', { body: { team_test: true, team_id: ACCT.team.id } });
+      if (r.error) { var m = r.error.message; try { m = (await r.error.context.json()).error || m; } catch (x) {} return { error: { message: m } }; } return r; },
+      'Test alert sent to the team. Press Refresh results in a few seconds to see who it reached.');
+  };
+  var rl = $('refreshLog'); if (rl) rl.onclick = function () { ACCT.msg = ACCT.err = ''; acctReload(); };
   var pd = $('pushData'); if (pd) pd.onclick = function () {
     acctRun(async function () {
       var b64 = String(window.HW_CAD || '').split(',').pop(), bin = atob(b64), glb = new Uint8Array(bin.length);
