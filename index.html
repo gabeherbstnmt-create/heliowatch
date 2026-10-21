@@ -2261,6 +2261,10 @@ var ROLE_WORD = { owner: 'Owner', admin: 'Admin', operator: 'Operator', viewer: 
 var ROLE_HINT = { owner: 'everything, including deleting the team', admin: 'manages members and trackers',
   operator: 'can command the tracker and send paths', viewer: 'can watch, cannot command' };
 var LEVEL_WORD = { critical: 'Critical only', warning: 'Warnings too', all: 'Everything' };
+/* carriers with a working email-to-text gateway (AT&T closed theirs in 2025) */
+var CARRIERS = [['verizon', 'Verizon'], ['tmobile', 'T-Mobile'], ['metro', 'Metro by T-Mobile'], ['uscellular', 'US Cellular'],
+  ['cricket', 'Cricket'], ['googlefi', 'Google Fi'], ['boost', 'Boost Mobile']];
+var CHANNEL_WORD = { sms: 'Text · Twilio', carrier: 'Text · carrier', email: 'Email' };
 function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
 function toE164(s) {
   s = String(s || '').trim(); if (!s) return null;
@@ -2281,7 +2285,7 @@ var DEMO_KEY = 'hw-demo-acct';
 function demoLoad() {
   var d = null; try { d = JSON.parse(localStorage.getItem(DEMO_KEY) || 'null'); } catch (e) {}
   if (!d) d = { profile: { full_name: 'You', email: 'you@nmt.edu', phone_e164: null }, team: { id: 'demo', name: 'NMT Solar Tracker' },
-    me: { sms_alerts: true, alert_level: 'critical' }, members: [], invites: [], paths: [] };
+    me: { sms_alerts: true, alert_level: 'critical', email_alerts: true, text_via: 'twilio' }, members: [], invites: [], paths: [] };
   return d;
 }
 function demoSave(d) { try { localStorage.setItem(DEMO_KEY, JSON.stringify(d)); } catch (e) {} }
@@ -2289,7 +2293,8 @@ function demoSync() {
   var d = demoLoad();
   ACCT.profile = d.profile; ACCT.team = d.team; ACCT.teams = [d.team]; ACCT.role = 'owner';
   ACCT.roster = [{ user_id: 'me', full_name: d.profile.full_name, email: d.profile.email, phone_e164: d.profile.phone_e164, role: 'owner',
-    sms_alerts: d.me.sms_alerts, alert_level: d.me.alert_level, me: true }].concat(d.members);
+    carrier: d.profile.carrier || null, sms_alerts: d.me.sms_alerts, alert_level: d.me.alert_level,
+    email_alerts: d.me.email_alerts !== false, text_via: d.me.text_via || 'twilio', me: true }].concat(d.members);
   ACCT.invites = d.invites; ACCT.texts = []; ACCT.paths = d.paths;
 }
 
@@ -2335,7 +2340,7 @@ async function acctReload() {
     ACCT.roster = (r.data || []).map(function (m) { m.me = m.user_id === uid; return m; });
     var inv = canManage() ? await sb.from('team_invites').select('*').eq('team_id', ACCT.team.id).is('accepted_at', null).order('created_at') : { data: [] };
     ACCT.invites = inv.data || [];
-    var tx = await sb.from('sms_log').select('created_at, to_phone, status, body, error').eq('team_id', ACCT.team.id).order('created_at', { ascending: false }).limit(15);
+    var tx = await sb.from('sms_log').select('created_at, to_phone, status, body, error, channel').eq('team_id', ACCT.team.id).order('created_at', { ascending: false }).limit(15);
     ACCT.texts = tx.data || [];
     var pa = await sb.from('trajectories').select('id, name, points, outside, updated_at').eq('team_id', ACCT.team.id).order('updated_at', { ascending: false });
     ACCT.paths = pa.data || [];
@@ -2407,21 +2412,28 @@ function teamHTML() {
     (demo ? '<button class="btn" id="demoReset">Reset demo</button>' : '<button class="btn" id="signOut">Sign out</button>') + '</div>';
   h += '<div class="acc-grid">';
   /* you */
-  h += '<div class="card"><h3>Your alerts</h3><p class="cap">Texts go to your phone when a tracker on this team raises an alert.</p>' +
+  var via = mine.text_via || 'twilio';
+  h += '<div class="card"><h3>Your alerts</h3><p class="cap">How you hear about it when a tracker on this team raises an alert.</p>' +
     '<form id="meForm" class="acc-form"><label>Name<input name="name" value="' + esc(P.full_name || '') + '"></label>' +
     '<label>Mobile number<input name="phone" inputmode="tel" placeholder="(575) 555-0123" value="' + esc(prettyPhone(P.phone_e164)) + '"></label>' +
     '<div class="acc-row"><span class="lb2">Text me</span><div class="seg" role="group" aria-label="Text alerts">' +
       [['on', 'On'], ['off', 'Off']].map(function (o) { return '<button type="button" data-sms="' + o[0] + '" aria-pressed="' + ((mine.sms_alerts !== false) === (o[0] === 'on')) + '">' + o[1] + '</button>'; }).join('') + '</div></div>' +
+    '<div class="acc-row"><span class="lb2">Texts via</span><div class="seg" role="group" aria-label="How texts are sent">' +
+      [['twilio', 'Twilio'], ['carrier', 'My carrier (free)']].map(function (o) { return '<button type="button" data-via="' + o[0] + '" aria-pressed="' + (via === o[0]) + '">' + o[1] + '</button>'; }).join('') + '</div></div>' +
+    '<label id="carrierRow"' + (via === 'carrier' ? '' : ' hidden') + '>Your carrier <small>texts arrive by email-to-text; carriers may delay or filter them</small><select name="carrier"><option value="">Choose…</option>' +
+      CARRIERS.map(function (c) { return '<option value="' + c[0] + '"' + (P.carrier === c[0] ? ' selected' : '') + '>' + c[1] + '</option>'; }).join('') + '</select></label>' +
+    '<div class="acc-row"><span class="lb2">Email me</span><div class="seg" role="group" aria-label="Email alerts">' +
+      [['on', 'On'], ['off', 'Off']].map(function (o) { return '<button type="button" data-eml="' + o[0] + '" aria-pressed="' + ((mine.email_alerts !== false) === (o[0] === 'on')) + '">' + o[1] + '</button>'; }).join('') + '</div><span class="tdir">' + esc(P.email || '') + '</span></div>' +
     '<div class="acc-row"><span class="lb2">For</span><div class="seg" role="group" aria-label="Alert level">' +
       ['critical', 'warning', 'all'].map(function (l) { return '<button type="button" data-lvl="' + l + '" aria-pressed="' + ((mine.alert_level || 'critical') === l) + '">' + LEVEL_WORD[l] + '</button>'; }).join('') + '</div></div>' +
-    '<div class="trj-row"><button class="btn primary" type="submit"' + (ACCT.busy ? ' disabled' : '') + '>Save</button><button class="btn" type="button" id="testText"' + (demo || !P.phone_e164 ? ' disabled title="' + (demo ? 'Not available in demo mode' : 'Save a phone number first') + '"' : '') + '>Send test text</button></div></form>' +
+    '<div class="trj-row"><button class="btn primary" type="submit"' + (ACCT.busy ? ' disabled' : '') + '>Save</button><button class="btn" type="button" id="testText"' + (demo ? ' disabled title="Not available in demo mode"' : '') + '>Send test alert</button></div></form>' +
     '<div class="acc-levels"><div><b>Critical</b> motor stall, driver thermal trip, emergency stop, tracker offline</div><div><b>Warnings</b> current above envelope, pointing error, low pack voltage, wind stow</div><div><b>Everything</b> also mode changes and commands</div></div></div>';
   /* members */
   h += '<div class="card"><h3>Team members · ' + ACCT.roster.length + '</h3><p class="cap">Everyone here can open this console. Members with texts on get alerts.</p><div class="mem">' +
     ACCT.roster.map(function (m) {
       var ctl = mg && !m.me && m.role !== 'owner';
       return '<div class="mrow"><div class="acc-av sm">' + esc(initials(m.full_name, m.email)) + '</div><div class="grow"><div class="mn">' + esc(m.full_name || m.email) + (m.me ? ' <small>(you)</small>' : '') + '</div>' +
-        '<div class="ms">' + esc(m.email || '') + (m.phone_e164 ? ' · ' + esc(maskPhone(m.phone_e164)) : ' · no phone') + ' · ' + (m.sms_alerts ? 'texts on' : 'texts off') + '</div></div>' +
+        '<div class="ms">' + esc(m.email || '') + (m.phone_e164 ? ' · ' + esc(maskPhone(m.phone_e164)) : ' · no phone') + ' · ' + [m.sms_alerts ? 'texts via ' + (m.text_via === 'carrier' ? 'carrier' : 'Twilio') : 'no texts', m.email_alerts !== false ? 'email' : 'no email'].join(', ') + '</div></div>' +
         (ctl ? '<select data-role="' + m.user_id + '" aria-label="Role">' + ['admin', 'operator', 'viewer'].map(function (r) { return '<option value="' + r + '"' + (m.role === r ? ' selected' : '') + '>' + ROLE_WORD[r] + '</option>'; }).join('') + '</select>' +
           '<button class="xbtn" data-rm="' + m.user_id + '" aria-label="Remove ' + esc(m.full_name || m.email) + '">&times;</button>'
           : '<span class="badge">' + ROLE_WORD[m.role] + '</span>') + '</div>';
@@ -2441,10 +2453,10 @@ function teamHTML() {
   if (!demo && mg && window.HW_SITES && !window.HW_PUBLIC) h += '<div class="card"><h3>Console data for the website</h3><p class="cap">The published site holds no tracker data; members download it after signing in. Upload this console’s telemetry and 3D model so they can.</p>' +
     '<div class="trj-row"><button class="btn primary" id="pushData"' + (ACCT.busy ? ' disabled' : '') + '>Upload console data</button></div></div>';
   /* texts */
-  h += '<div class="card"><h3>Recent texts</h3><p class="cap">Every alert text the team was sent, and whether Twilio accepted it.</p>' +
+  h += '<div class="card"><h3>Recent alerts sent</h3><p class="cap">Every text and email the team was sent, and whether it went out.</p>' +
     (ACCT.texts.length ? '<div class="mem">' + ACCT.texts.map(function (t) {
-      return '<div class="mrow"><span class="st ' + (t.status === 'sent' ? 'done' : 'rejected') + '">' + esc(t.status) + '</span><div class="grow"><div class="ms">' + esc(new Date(t.created_at).toLocaleString()) + ' · to ' + esc(maskPhone(t.to_phone)) + '</div><div class="mn sm">' + esc(t.body) + (t.error ? ' <small>(' + esc(t.error) + ')</small>' : '') + '</div></div></div>'; }).join('') + '</div>'
-      : '<div class="none">' + (demo ? 'Texts appear here once the account server and Twilio are connected.' : 'No texts yet.') + '</div>') + '</div>';
+      return '<div class="mrow"><span class="st ' + (t.status === 'sent' ? 'done' : 'rejected') + '">' + esc(t.status) + '</span><div class="grow"><div class="ms">' + esc(new Date(t.created_at).toLocaleString()) + ' · ' + esc(CHANNEL_WORD[t.channel] || 'Text') + ' to ' + esc(t.channel === 'email' ? t.to_phone : maskPhone(String(t.to_phone).split('@')[0].replace(/^(\d{10})$/, '+1$1'))) + '</div><div class="mn sm">' + esc(t.body) + (t.error ? ' <small>(' + esc(t.error) + ')</small>' : '') + '</div></div></div>'; }).join('') + '</div>'
+      : '<div class="none">' + (demo ? 'Alerts appear here once the account server is connected.' : 'Nothing sent yet.') + '</div>') + '</div>';
   return h + '</div>';
 }
 function bindTeam(host) {
@@ -2452,21 +2464,26 @@ function bindTeam(host) {
   var nt = $('newTeam'); if (nt) nt.onsubmit = function (e) { e.preventDefault(); var name = new FormData(nt).get('team');
     acctRun(function () { return sb.rpc('create_team', { team_name: name }); }, 'Team created. Add your members below.'); };
   if (!ACCT.team) return;
-  var mine = me(), pend = { sms: mine.sms_alerts !== false, lvl: mine.alert_level || 'critical' };
+  var mine = me(), pend = { sms: mine.sms_alerts !== false, lvl: mine.alert_level || 'critical', eml: mine.email_alerts !== false, via: mine.text_via || 'twilio' };
+  host.querySelectorAll('[data-eml]').forEach(function (b) { b.onclick = function () { pend.eml = b.dataset.eml === 'on'; host.querySelectorAll('[data-eml]').forEach(function (x) { x.setAttribute('aria-pressed', x === b); }); }; });
+  host.querySelectorAll('[data-via]').forEach(function (b) { b.onclick = function () { pend.via = b.dataset.via; $('carrierRow').hidden = pend.via !== 'carrier';
+    host.querySelectorAll('[data-via]').forEach(function (x) { x.setAttribute('aria-pressed', x === b); }); }; });
   host.querySelectorAll('[data-sms]').forEach(function (b) { b.onclick = function () { pend.sms = b.dataset.sms === 'on'; host.querySelectorAll('[data-sms]').forEach(function (x) { x.setAttribute('aria-pressed', x === b); }); }; });
   host.querySelectorAll('[data-lvl]').forEach(function (b) { b.onclick = function () { pend.lvl = b.dataset.lvl; host.querySelectorAll('[data-lvl]').forEach(function (x) { x.setAttribute('aria-pressed', x === b); }); }; });
   $('meForm').onsubmit = function (e) {
     e.preventDefault(); var v = Object.fromEntries(new FormData(e.target).entries()), ph = toE164(v.phone);
     if (ph === undefined) { ACCT.msg = ''; ACCT.err = 'That phone number doesn’t look right. Use a 10-digit US number or +country code.'; acctPaint(); return; }
-    if (demo) { var d = demoLoad(); d.profile.full_name = v.name; d.profile.phone_e164 = ph; d.me = { sms_alerts: pend.sms, alert_level: pend.lvl }; demoSave(d); return acctRun(function () {}, 'Saved in this browser.'); }
+    if (pend.sms && pend.via === 'carrier' && !v.carrier) { ACCT.msg = ''; ACCT.err = 'Choose your carrier, or send texts through Twilio.'; acctPaint(); return; }
+    if (demo) { var d = demoLoad(); d.profile.full_name = v.name; d.profile.phone_e164 = ph; d.profile.carrier = v.carrier || null;
+      d.me = { sms_alerts: pend.sms, alert_level: pend.lvl, email_alerts: pend.eml, text_via: pend.via }; demoSave(d); return acctRun(function () {}, 'Saved in this browser.'); }
     acctRun(async function () {
-      var a = await sb.from('profiles').update({ full_name: v.name, phone_e164: ph }).eq('id', ACCT.user.id); if (a.error) return a;
-      return sb.rpc('set_my_alerts', { t: ACCT.team.id, texts: pend.sms, level: pend.lvl });
+      var a = await sb.from('profiles').update({ full_name: v.name, phone_e164: ph, carrier: v.carrier || null }).eq('id', ACCT.user.id); if (a.error) return a;
+      return sb.rpc('set_my_alerts', { t: ACCT.team.id, texts: pend.sms, level: pend.lvl, emails: pend.eml, via: pend.via });
     }, 'Saved.');
   };
   var tt = $('testText'); if (tt) tt.onclick = function () {
     acctRun(async function () { var r = await sb.functions.invoke('notify', { body: { test: true, team_id: ACCT.team.id } });
-      if (r.error) { var m = r.error.message; try { m = (await r.error.context.json()).error || m; } catch (x) {} return { error: { message: m } }; } return r; }, 'Test text sent. It should arrive in a few seconds.');
+      if (r.error) { var m = r.error.message; try { m = (await r.error.context.json()).error || m; } catch (x) {} return { error: { message: m } }; } return r; }, 'Test sent to your chosen channels. The result for each is under Recent alerts sent.');
   };
   var so = $('signOut'); if (so) so.onclick = function () { sb.auth.signOut(); };
   var pd = $('pushData'); if (pd) pd.onclick = function () {
