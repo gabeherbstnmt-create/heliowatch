@@ -640,7 +640,7 @@ input.scrub::-moz-range-thumb{width:14px;height:14px;border-radius:50%;backgroun
 </style>
 
 <div class="gate" id="gate" hidden></div>
-<div class="verbadge" id="verBadge" title="HelioWatch 1.0.0, built Oct 22, 2026 from commit 5a3557d">v1.0.0 · 5a3557d · Oct 22, 2026</div>
+<div class="verbadge" id="verBadge" title="HelioWatch 1.0.0, built Oct 29, 2026 from commit 990009e">v1.0.0 · 990009e · Oct 29, 2026</div>
 <div class="app">
 <nav class="rail" id="tabs" aria-label="Sections">
   <div class="mark" title="HelioWatch"><svg width="28" height="28" viewBox="0 0 26 26" aria-hidden="true">
@@ -680,6 +680,9 @@ input.scrub::-moz-range-thumb{width:14px;height:14px;border-radius:50%;backgroun
 
   <!-- STATUS -->
   <section data-view="status" hidden>
+    <div class="eyebrow">Live device</div>
+    <div class="grid" id="devlive"></div>
+    <div class="eyebrow">Readings</div>
     <div class="grid g3">
       <div class="card inst">
         <div class="ttl"><span>Azimuth</span><b id="azrange"></b></div>
@@ -738,7 +741,7 @@ input.scrub::-moz-range-thumb{width:14px;height:14px;border-radius:50%;backgroun
       </div>
       <div class="efwrap"><svg id="efSvg" viewBox="0 0 1240 560" role="img" aria-label="Energy flow diagram"></svg></div>
       <div class="efbar"><span class="t" id="efT">—</span><input type="range" class="scrub" id="efScrub" min="0" max="1" value="1" aria-label="Moment shown"></div>
-      <p class="ef-note">Array output and motor current are metered (simulated for now). Motor power is current times pack voltage. The Arduino's own draw is not metered.
+      <p class="ef-note">Array output and motor current are metered at the tracker. Motor power is current times pack voltage. The Arduino's own draw is not metered.
         The parts list has no charge controller, so no charging path is drawn from the array to the pack &mdash; the dotted line marks where one would go.</p>
     </div>
     <div class="kpis" id="efKpi"></div>
@@ -763,7 +766,7 @@ input.scrub::-moz-range-thumb{width:14px;height:14px;border-radius:50%;backgroun
   <section data-view="twin">
     <div class="twinroot">
     <div class="viewer stagebg">
-      <div id="scene" aria-label="3D model of the tracker, replaying the recorded telemetry">
+      <div id="scene" aria-label="3D model of the tracker, showing its live telemetry">
         <div class="ov tl" id="ovClock"><div class="clock" id="clk">--:--</div><div class="date" id="dte">—</div></div>
         <div class="ov callouts" id="callouts" aria-hidden="true"><svg class="co-lines" id="coLines"></svg></div>
         <div class="ov tr"><span class="pill live" id="livePill" hidden><i></i>Live</span><span class="pill idle" id="modePill"><i></i><span>idle</span></span><span class="pill" id="faultPill" hidden></span></div>
@@ -797,6 +800,152 @@ input.scrub::-moz-range-thumb{width:14px;height:14px;border-radius:50%;backgroun
 </div>
 <script>window.HW_PUBLIC=true;window.HW_SUPABASE={"url": "https://nuopwiymjworglhvzdsm.supabase.co", "anonKey": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im51b3B3aXltandvcmdsaHZ6ZHNtIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTI1OTkwNjUsImV4cCI6MjEwODE3NTA2NX0.7oIJArAw9JkXeXu5I8AeLagpoBySHfzTZgDdO3EFLAc"};</script>
 <script>
+/* ══ HelioWatch — live telemetry for the console ══════════════════════
+   The console no longer replays a simulated week. After sign-in this reads
+   the team's tracker telemetry from public.telemetry (what the ingest
+   function stored, docs/TELEMETRY_API.md) and packs it into the same columnar
+   payload the console has always drawn from (window.HW_SITES), so every tab
+   shows the real machine. A reading the tracker does not send yet stays null,
+   and the console shows it as missing rather than as zero. The sun's position
+   is computed from the time and the site, which is astronomy, not a guess.
+   It then polls for new samples and tells the console to redraw.          */
+(function () {
+  'use strict';
+  var WINDOW_H = 24;                   /* history loaded at sign-in */
+  var PAGE = 1000;                     /* PostgREST's row cap per request */
+  var POLL_MS = 15000;
+
+  /* the machine's own limits, from the team's design (not measurements) */
+  var MACHINE = {
+    az_limit_a: 2.60, el_limit_a: 2.10, az_range: [60, 300], el_range: [5, 88],
+    deadband: { az: 1.6, el: 1.4 }, temp_trip_c: 80, temp_clear_c: 65, wind_stow_ms: 12.0
+  };
+  var MODES = ['idle', 'homing', 'auto', 'manual', 'path', 'stow', 'fault'];
+  var NUM_COLS = ['az_pos_deg', 'az_error_deg', 'az_current_a', 'az_temp_c', 'az_moving_s',
+    'el_pos_deg', 'el_error_deg', 'el_current_a', 'el_temp_c', 'el_moving_s',
+    'panel_w', 'irradiance_wm2', 'wind_ms', 'ambient_c', 'sun_az_deg', 'sun_el_deg', 'supply_v',
+    'az_moves', 'az_degrees', 'az_stalls', 'az_overcurrent', 'az_reversals',
+    'el_moves', 'el_degrees', 'el_stalls', 'el_overcurrent', 'el_reversals'];
+
+  /* NOAA's approximation, the same one the old simulator used */
+  function sun(ms, lat, lon) {
+    var d = new Date(ms), start = Date.UTC(d.getUTCFullYear(), 0, 1);
+    var doy = Math.floor((ms - start) / 864e5) + 1;
+    var hour = d.getUTCHours() + d.getUTCMinutes() / 60 + d.getUTCSeconds() / 3600;
+    var g = 2 * Math.PI / 365 * (doy - 1 + (hour - 12) / 24);
+    var eqt = 229.18 * (0.000075 + 0.001868 * Math.cos(g) - 0.032077 * Math.sin(g) - 0.014615 * Math.cos(2 * g) - 0.040849 * Math.sin(2 * g));
+    var decl = 0.006918 - 0.399912 * Math.cos(g) + 0.070257 * Math.sin(g) - 0.006758 * Math.cos(2 * g)
+      + 0.000907 * Math.sin(2 * g) - 0.002697 * Math.cos(3 * g) + 0.001480 * Math.sin(3 * g);
+    var tst = ((hour * 60 + eqt + 4 * lon) % 1440 + 1440) % 1440;
+    var ha = (tst / 4 - 180) * Math.PI / 180, la = lat * Math.PI / 180;
+    var cz = Math.max(-1, Math.min(1, Math.sin(la) * Math.sin(decl) + Math.cos(la) * Math.cos(decl) * Math.cos(ha)));
+    var el = 90 - Math.acos(cz) * 180 / Math.PI;
+    var az = (Math.atan2(Math.sin(ha), Math.cos(ha) * Math.sin(la) - Math.tan(decl) * Math.cos(la)) * 180 / Math.PI + 180) % 360;
+    return [Math.round(az * 10) / 10, Math.round(el * 10) / 10];
+  }
+
+  /* site-local offset in hours (Socorro keeps US Mountain time, with DST) */
+  function tzOffset(ms) {
+    try {
+      var p = new Intl.DateTimeFormat('en-US', { timeZone: 'America/Denver', timeZoneName: 'shortOffset' }).formatToParts(new Date(ms));
+      var m = /GMT([+-]\d+)/.exec((p.find(function (x) { return x.type === 'timeZoneName'; }) || {}).value || '');
+      if (m) return +m[1];
+    } catch (e) {}
+    return -7;
+  }
+
+  var num = function (v) { return typeof v === 'number' && isFinite(v) ? v : null; };
+
+  function pack(tr, rows) {
+    var cols = { dt: [], mode: [], fault: [] }, faults = [''], modes = MODES.slice(), prev = null, t0 = null, fw = null;
+    NUM_COLS.forEach(function (c) { cols[c] = []; });
+    rows.forEach(function (r) {
+      var s = r.sample || {}, t = Date.parse(r.ts || r.received_at) / 1000;
+      if (prev !== null && t <= prev) t = prev + 0.001;       /* keep time strictly increasing */
+      if (t0 === null) t0 = t;
+      cols.dt.push(prev === null ? 0 : Math.round((t - prev) * 1000) / 1000); prev = t;
+      var m = String(s.mode || 'idle'); if (modes.indexOf(m) < 0) modes.push(m);
+      cols.mode.push(modes.indexOf(m));
+      var f = (Array.isArray(s.faults) ? s.faults : []).join(';'); if (faults.indexOf(f) < 0) faults.push(f);
+      cols.fault.push(faults.indexOf(f));
+      if (s.fw) fw = s.fw;
+      ['az', 'el'].forEach(function (ax) {
+        var a = (s.axes || {})[ax] || {}, k = a.counters || {}, pos = num(a.pos_deg), tgt = num(a.target_deg);
+        cols[ax + '_pos_deg'].push(pos);
+        cols[ax + '_error_deg'].push(pos !== null && tgt !== null ? Math.round((tgt - pos) * 100) / 100 : null);
+        cols[ax + '_current_a'].push(num(a.current_a));
+        cols[ax + '_temp_c'].push(num(a.temp_c));
+        cols[ax + '_moving_s'].push(a.moving === true ? cols.dt[cols.dt.length - 1] : a.moving === false ? 0 : null);
+        cols[ax + '_moves'].push(num(k.moves)); cols[ax + '_degrees'].push(num(k.degrees));
+        cols[ax + '_stalls'].push(num(k.stalls)); cols[ax + '_overcurrent'].push(num(k.overcurrent));
+        cols[ax + '_reversals'].push(num(k.reversals));
+      });
+      var e = s.env || {};
+      cols.panel_w.push(num(e.panel_w)); cols.irradiance_wm2.push(num(e.irradiance_wm2));
+      cols.wind_ms.push(num(e.wind_ms)); cols.ambient_c.push(num(e.ambient_c));
+      var sp = sun(t * 1000, tr.lat, tr.lon); cols.sun_az_deg.push(sp[0]); cols.sun_el_deg.push(sp[1]);
+      var az = (s.axes || {}).az || {}; cols.supply_v.push(num(az.supply_v));
+    });
+    var meta = { device_id: tr.device_id, fw: fw, site: tr.site || '', label: tr.site || tr.name || tr.device_id,
+      name: tr.name || '', lat: tr.lat, lon: tr.lon, tz_offset: tzOffset(Date.now()), t0: t0, n: rows.length,
+      interval_s: 5, modes: modes, faults: faults, live: true };
+    Object.keys(MACHINE).forEach(function (k) { meta[k] = MACHINE[k]; });
+    return { meta: meta, cols: cols };
+  }
+
+  async function fetchSince(sb, tr, sinceIso, afterId) {
+    var out = [];
+    for (var p = 0; p < 40; p++) {
+      var q = sb.from('telemetry').select('id, ts, received_at, sample').eq('tracker_id', tr.id).order('id', { ascending: true }).limit(PAGE);
+      q = afterId != null ? q.gt('id', afterId) : q.gte('received_at', sinceIso);
+      var r = await q;
+      if (r.error) throw r.error;
+      out = out.concat(r.data);
+      if (r.data.length < PAGE) break;
+      afterId = r.data[r.data.length - 1].id;
+    }
+    return out;
+  }
+
+  /* -> { sites, tracker } or { error }. Picks the team's first tracker that has reported. */
+  window.hwLiveSites = async function (sb) {
+    var tr = await sb.from('trackers').select('id, device_id, name, site, lat, lon, last_seen_at').order('created_at');
+    if (tr.error) return { error: tr.error.message };
+    var list = (tr.data || []).filter(function (t) { return t.last_seen_at; });
+    if (!(tr.data || []).length) return { error: 'No tracker is registered to your team yet.' };
+    if (!list.length) return { error: 'Your tracker has not reported yet. Power on the Giga and check its Wi-Fi.' };
+    var t = list[0];
+    if (t.lat == null || t.lon == null) { t.lat = 34.0661; t.lon = -106.9059; }
+    var rows = await fetchSince(sb, t, new Date(Date.now() - WINDOW_H * 3600e3).toISOString(), null);
+    if (!rows.length) {
+      /* reported once, but not in the window: show its last day on record */
+      var last = await sb.from('telemetry').select('received_at').eq('tracker_id', t.id).order('id', { ascending: false }).limit(1);
+      var end = last.data && last.data[0] ? Date.parse(last.data[0].received_at) : Date.now();
+      rows = await fetchSince(sb, t, new Date(end - WINDOW_H * 3600e3).toISOString(), null);
+    }
+    if (!rows.length) return { error: 'Your tracker has not reported yet. Power on the Giga and check its Wi-Fi.' };
+    var sites = {}; sites[t.device_id] = pack(t, rows);
+    var state = { sb: sb, tr: t, rows: rows };
+    window.HW_LIVE = state;
+    return { sites: sites, tracker: t };
+  };
+
+  /* new samples every POLL_MS; drops samples older than the window */
+  window.hwLiveFollow = function () {
+    var st = window.HW_LIVE; if (!st || st.timer) return;
+    st.timer = setInterval(async function () {
+      try {
+        var fresh = await fetchSince(st.sb, st.tr, null, st.rows[st.rows.length - 1].id);
+        if (!fresh.length) return;
+        var lo = Date.now() - WINDOW_H * 3600e3, all = st.rows.concat(fresh);
+        st.rows = all.filter(function (r) { return Date.parse(r.received_at) >= lo; });
+        if (!st.rows.length) st.rows = all.slice(-1);          /* never empty: the console needs a newest sample */
+        window.HW_SITES[st.tr.device_id] = pack(st.tr, st.rows);
+        dispatchEvent(new CustomEvent('hw:data', { detail: st.tr.device_id }));
+      } catch (e) { /* a missed poll is retried on the next tick */ }
+    }, POLL_MS);
+  };
+})();
 /* ══ HelioWatch — published site bootstrap ═══════════════════════════
    The published page carries no tracker data. This runs first: it signs the
    person in (or finishes an invite / password-reset link), downloads the
@@ -821,6 +970,8 @@ input.scrub::-moz-range-thumb{width:14px;height:14px;border-radius:50%;backgroun
       '<button class="btn primary" type="submit"' + (busy ? ' disabled' : '') + '>Save and continue</button></form>';
     else if (mode === 'reset') h += '<h2>Reset your password</h2><form id="bForm" class="gform"><label>Email<input type="email" name="email" required autocomplete="email"></label>' +
       '<button class="btn primary" type="submit"' + (busy ? ' disabled' : '') + '>Email me a reset link</button></form><button class="linkbtn" data-m="in">Back to sign in</button>';
+    else if (mode === 'nodata') h += '<h2>No telemetry yet</h2><p class="gnote">The console shows the tracker’s live readings, and there are none to show.</p>' +
+      '<button class="btn primary" id="bRetry">Check again</button> <button class="btn" id="bOut">Sign out</button>';
     else if (mode === 'noteam') h += '<h2>You’re signed in, but not on a team yet</h2><p class="gnote">Ask the team owner to add you, using this email. Then sign in again.</p><button class="btn" id="bOut">Sign out</button>';
     else h += '<h2>Sign in</h2><form id="bForm" class="gform"><label>Email<input type="email" name="email" required autocomplete="email"></label>' +
       '<label>Password<input type="password" name="pw" required autocomplete="current-password"></label>' +
@@ -831,6 +982,7 @@ input.scrub::-moz-range-thumb{width:14px;height:14px;border-radius:50%;backgroun
     if (msg) h += '<div class="heard">' + esc(msg) + '</div>';
     gate.innerHTML = h + '</div>';
     gate.querySelectorAll('[data-m]').forEach(function (b) { b.onclick = function () { mode = b.dataset.m; err = msg = ''; paint(); }; });
+    var again = document.getElementById('bRetry'); if (again) again.onclick = function () { err = ''; start(); };
     var out = document.getElementById('bOut'); if (out) out.onclick = function () { sb.auth.signOut().then(function () { location.replace(location.pathname); }); };
     var f = document.getElementById('bForm'); if (!f) return;
     f.onsubmit = async function (e) {
@@ -843,28 +995,33 @@ input.scrub::-moz-range-thumb{width:14px;height:14px;border-radius:50%;backgroun
     };
   }
 
-  /* data from the private bucket; the console expects the same globals the local build embeds */
+  /* the tracker's live telemetry (web/live.js), plus the CAD model: embedded in
+     the local build, from the private bucket on the published site */
   async function start() {
     mode = 'loading'; paint();
-    var st = sb.storage.from('console');
-    var got = await Promise.all(['sites.json', 'kinematics.json', 'tracker.glb'].map(function (n) { return st.download(n); }));
-    var bad = got.find(function (g) { return g.error; });
-    if (bad) {
-      var mem = await sb.from('team_members').select('team_id', { count: 'exact', head: true });
-      if (!mem.count) { mode = 'noteam'; paint(); return; }
-      mode = 'in'; err = 'The console data has not been uploaded yet. An owner can upload it from the Team page of the local console.'; paint(); return;
+    var mem = await sb.from('team_members').select('team_id', { count: 'exact', head: true });
+    if (!mem.count) { mode = 'noteam'; paint(); return; }
+    var live = await window.hwLiveSites(sb);
+    if (live.error) { mode = 'nodata'; err = live.error; paint(); return; }
+    if (!window.HW_CAD) {
+      var st = sb.storage.from('console');
+      var got = await Promise.all(['kinematics.json', 'tracker.glb'].map(function (n) { return st.download(n); }));
+      if (got.find(function (g) { return g.error; })) {
+        mode = 'in'; err = 'The 3D model has not been uploaded yet. An owner can upload it from the Team page of the local console.'; paint(); return;
+      }
+      window.HW_KIN = JSON.parse(await got[0].data.text());
+      var buf = new Uint8Array(await got[1].data.arrayBuffer()), bin = '';
+      for (var i = 0; i < buf.length; i += 0x8000) bin += String.fromCharCode.apply(null, buf.subarray(i, i + 0x8000));
+      window.HW_CAD = 'data:model/gltf-binary;base64,' + btoa(bin);
     }
-    window.HW_SITES = JSON.parse(await got[0].data.text());
-    window.HW_KIN = JSON.parse(await got[1].data.text());
-    var buf = new Uint8Array(await got[2].data.arrayBuffer()), bin = '';
-    for (var i = 0; i < buf.length; i += 0x8000) bin += String.fromCharCode.apply(null, buf.subarray(i, i + 0x8000));
-    window.HW_CAD = 'data:model/gltf-binary;base64,' + btoa(bin);
+    window.HW_SITES = live.sites;
     gate.hidden = true; app.hidden = false;
     document.querySelectorAll('script[type="text/hw-late"]').forEach(function (old) {
       var s = document.createElement('script');
       if (old.dataset.kind === 'module') s.type = 'module';
       s.textContent = old.textContent; old.replaceWith(s);
     });
+    window.hwLiveFollow();
   }
 
   try {
@@ -908,7 +1065,8 @@ function unpack(id) {
 
 /* ── helpers ─────────────────────────────────────────────────────── */
 function q(a, p) {
-  if (!a.length) return 0;
+  a = a.filter(function (v) { return v !== null && v !== undefined && !isNaN(v); });
+  if (!a.length) return null;
   var s = a.slice().sort(function (x, y) { return x - y; }), i = (s.length - 1) * p,
       lo = Math.floor(i), hi = Math.ceil(i);
   return lo === hi ? s[lo] : s[lo] + (s[hi] - s[lo]) * (i - lo);
@@ -928,6 +1086,23 @@ function $(id) { return document.getElementById(id); }
 function setText(id, v) { var e = $(id); if (e) e.textContent = v; }
 function setHTML(id, v) { var e = $(id); if (e) e.innerHTML = v; }
 
+/* Which readings the tracker actually sends. The console shows only what it
+   reports: a reading it has never sent is "not wired yet", never a zero. */
+var HAS = {};
+function hasCol(k) { return ROWS.some(function (r) { return r[k] !== null && r[k] !== undefined; }); }
+function sensed() {
+  HAS = { pos: hasCol('az_pos') || hasCol('el_pos'), cur: hasCol('az_cur') || hasCol('el_cur'),
+    temp: hasCol('az_temp') || hasCol('el_temp'), counters: hasCol('az_moves') || hasCol('el_moves'),
+    power: hasCol('watt'), irr: hasCol('irr'), wind: hasCol('wind'), amb: hasCol('amb'), volt: hasCol('volt') };
+  HAS.motor = HAS.pos || HAS.cur || HAS.temp;
+}
+function notWired(title, needs) {
+  return '<div class="card nowired"><h3>' + title + '</h3><p class="cap"><span class="badge warn" style="margin-right:8px">Not wired yet</span>' +
+    'This needs ' + needs + '. The tracker is online but is not sending ' + (needs.indexOf(' and ') > 0 ? 'these readings' : 'this reading') +
+    ' yet; it fills in by itself once the firmware reports it.</p></div>';
+}
+function cnt(v) { return v === null || v === undefined ? '—' : Math.round(v).toLocaleString(); }
+
 var view = ROWS, hours = 24;
 function setWindow(h) {
   hours = h;
@@ -936,23 +1111,26 @@ function setWindow(h) {
   while (i < ROWS.length && ROWS[i].t < from) i++;
   view = ROWS.slice(i);
 }
-function winLabel() { return hours ? (hours >= 24 ? 'last ' + (hours / 24) + ' day' + (hours > 24 ? 's' : '') : 'last ' + hours + ' h') : 'full 7-day record'; }
+function winLabel() { return hours ? (hours >= 24 ? 'last ' + (hours / 24) + ' day' + (hours > 24 ? 's' : '') : 'last ' + hours + ' h') : 'everything loaded'; }
 
 /* ── statistics & health ─────────────────────────────────────────── */
 function axisStats(rows, k) {
   var mv = rows.filter(function (r) { return r[k + '_mv'] > 0; });
   var settled = rows.filter(function (r) { return r.mode === 'auto' && r[k + '_mv'] === 0; });
   var a = rows[0], b = rows[rows.length - 1];
-  var movingSec = rows.reduce(function (s, r) { return s + r[k + '_mv']; }, 0);
-  var moves = b[k + '_moves'] - a[k + '_moves'];
+  /* counters the tracker does not report stay null, not zero */
+  var d = function (c) { return b[k + c] == null || a[k + c] == null ? null : b[k + c] - a[k + c]; };
+  var temps = rows.map(function (r) { return r[k + '_temp']; }).filter(function (v) { return v != null; });
+  var movingSec = rows.reduce(function (s, r) { return s + (r[k + '_mv'] || 0); }, 0);
+  var moves = d('_moves');
   return {
     loadP95: q(mv.map(function (r) { return r[k + '_cur']; }), 0.95),
     tempP95: q(rows.map(function (r) { return r[k + '_temp']; }), 0.95),
-    tempMax: Math.max.apply(null, rows.map(function (r) { return r[k + '_temp']; })),
+    tempMax: temps.length ? Math.max.apply(null, temps) : null,
     errP95: q(settled.map(function (r) { return Math.abs(r[k + '_err']); }), 0.95),
-    moves: moves, degrees: b[k + '_deg'] - a[k + '_deg'],
-    stalls: b[k + '_stalls'] - a[k + '_stalls'], oc: b[k + '_oc'] - a[k + '_oc'],
-    reversals: b[k + '_rev'] - a[k + '_rev'], movingSec: movingSec,
+    moves: moves, degrees: d('_deg'),
+    stalls: d('_stalls'), oc: d('_oc'),
+    reversals: d('_rev'), movingSec: movingSec,
     secPerMove: moves ? movingSec / moves : 0,
     overTemp: rows.filter(function (r) { return r.faults.indexOf(k + '_over_temp') >= 0; }).length,
     totMoves: b[k + '_moves'], totDeg: b[k + '_deg'], totStalls: b[k + '_stalls'],
@@ -975,6 +1153,7 @@ var WEIGHTS = [
 ];
 function health(rows, k) {
   var s = axisStats(rows, k), base = BASE[k], A = AXES[k];
+  if (!HAS.motor) return { score: null, f: {}, stats: s, loadRatio: null, detail: {}, none: true };
   var loadRatio = base.loadP95 ? s.loadP95 / base.loadP95 : 1;
   var slewRatio = base.secPerMove ? s.secPerMove / base.secPerMove : 1;
   var faultIdx = s.moves ? (s.stalls * 5 + s.oc * 3 + s.overTemp * 0.15) / s.moves * 100 : 0;
@@ -1060,14 +1239,20 @@ function bucketize(rows, val, ncols, t0, t1, gaps) {
   });
   return out;
 }
+/* a live post can take 20+ s (the TLS handshake), so a gap is a minute of silence */
+function gapMs() { return Math.max(STEP * 2.5, 60e3); }
 function telemetryGaps(rows) {
   var g = [];
-  for (var i = 1; i < rows.length; i++) if (rows[i].t - rows[i-1].t > STEP * 2.5) g.push(rows[i-1].t);
+  for (var i = 1; i < rows.length; i++) if (rows[i].t - rows[i-1].t > gapMs()) g.push(rows[i-1].t);
   return g;
 }
 
 var CHARTS = [];
 function makeChart(cfg) {
+  /* a chart of readings the tracker has never sent is an empty-state card, not an empty axis */
+  var any = cfg.series.some(function (s) { return ROWS.some(function (r) { var v = s.val(r); return v !== null && v !== undefined && !isNaN(v); }); });
+  if (!any) return el('div', 'card chart-card', '<h3>' + cfg.title + '</h3><p class="cap" style="margin-top:10px"><span class="badge warn" style="margin-right:8px">Not wired yet</span>' +
+    'The tracker is online but does not send this reading yet. The chart fills in by itself once the firmware reports it.</p>');
   var card = el('div', 'card chart-card');
   var hd = el('div', 'ch-hd');
   hd.appendChild(el('div', null, '<h3>' + cfg.title + '</h3>'));
@@ -1217,8 +1402,8 @@ function chartDefs() {
     marks: [{ v: M.temp_trip_c, label: 'driver trip', color: 'var(--crit)' }] },
   { title: 'Worst pointing error', unit: '°', dp: 2, line: 'max',
     cap: 'Largest settled error in each interval, auto mode only. Error sawtooths up to the deadband between moves, so the peak is the number that matters.',
-    series: [{ label: 'Azimuth', color: 'var(--az)', rows: function (v) { return v.filter(function (r) { return r.mode === 'auto' && r.az_mv === 0; }); }, val: function (r) { return Math.abs(r.az_err); } },
-             { label: 'Elevation', color: 'var(--el)', rows: function (v) { return v.filter(function (r) { return r.mode === 'auto' && r.el_mv === 0; }); }, val: function (r) { return Math.abs(r.el_err); } }],
+    series: [{ label: 'Azimuth', color: 'var(--az)', rows: function (v) { return v.filter(function (r) { return r.mode === 'auto' && r.az_mv === 0; }); }, val: function (r) { return r.az_err == null ? null : Math.abs(r.az_err); } },
+             { label: 'Elevation', color: 'var(--el)', rows: function (v) { return v.filter(function (r) { return r.mode === 'auto' && r.el_mv === 0; }); }, val: function (r) { return r.el_err == null ? null : Math.abs(r.el_err); } }],
     marks: [{ v: M.deadband.az, label: 'az deadband', color: 'var(--muted)' }] },
   { title: 'Array output', unit: 'W', dp: 2, min: 0,
     cap: 'What the tracking is actually buying. Dips mark cloud, stow, or a mispointed axis.',
@@ -1266,8 +1451,8 @@ function drawCompass(r) {
     s += '<circle cx="' + sp[0].toFixed(1) + '" cy="' + sp[1].toFixed(1) + '" r="6" fill="var(--sun)"/>' +
          '<circle cx="' + sp[0].toFixed(1) + '" cy="' + sp[1].toFixed(1) + '" r="9.5" fill="none" stroke="var(--sun)" stroke-width="1.2" opacity=".45"/>';
   }
-  var np = polar(cx, cy, R - 12, r.az_pos);
-  s += '<line x1="' + cx + '" y1="' + cy + '" x2="' + np[0].toFixed(1) + '" y2="' + np[1].toFixed(1) + '" stroke="var(--az)" stroke-width="3"/>' +
+  var np = polar(cx, cy, R - 12, r.az_pos == null ? 0 : r.az_pos);
+  if (r.az_pos != null) s += '<line x1="' + cx + '" y1="' + cy + '" x2="' + np[0].toFixed(1) + '" y2="' + np[1].toFixed(1) + '" stroke="var(--az)" stroke-width="3"/>' +
        '<circle cx="' + cx + '" cy="' + cy + '" r="5" fill="var(--surface)" stroke="var(--az)" stroke-width="2.6"/>' +
        '';
   $('compass').innerHTML = s;
@@ -1289,10 +1474,12 @@ function drawElTape(r) {
     s += '<path d="M' + (xa - 1) + ' ' + ys.toFixed(1) + ' l-8 -4.5 v9 z" fill="var(--sun)"/>';
     s += '<line x1="' + xa + '" y1="' + ys.toFixed(1) + '" x2="' + xb + '" y2="' + ys.toFixed(1) + '" stroke="var(--sun)" stroke-dasharray="2 2"/>';
   }
+  if (r.el_pos != null) {
   var yt = Y(r.el_pos);
   s += '<path d="M' + (xb + 1) + ' ' + yt.toFixed(1) + ' l8 -5 v10 z" fill="var(--el)"/>';
   s += '<rect x="' + (xb + 10) + '" y="' + (yt - 8).toFixed(1) + '" width="42" height="16" fill="var(--surface)" stroke="var(--el)"/>';
   s += '<text x="' + (xb + 31) + '" y="' + (yt + 3.6).toFixed(1) + '" text-anchor="middle" font-size="10.5" font-weight="600" fill="var(--ink)" font-family="IBM Plex Mono, monospace">' + n(r.el_pos, 1) + '</text>';
+  }
   s += '<text x="' + ((xa + xb) / 2) + '" y="162" text-anchor="middle" font-size="9" fill="var(--muted)" font-family="IBM Plex Mono, monospace">TILT DEG</text>';
   setHTML('elarc', s);
 }
@@ -1343,7 +1530,7 @@ function renderNow() {
 }
 function renderTiles() {
   var az = axisStats(view, 'az'), es = axisStats(view, 'el');
-  var kwh = view.reduce(function (s, r) { return s + r.watt; }, 0) * (STEP/1000) / 3.6e6;
+  var kwh = view.reduce(function (s, r) { return s + (r.watt || 0); }, 0) * (STEP/1000) / 3.6e6;
   var expected = Math.round((view[view.length-1].t - view[0].t) / STEP) + 1;
   var lastFault = null;
   for (var i = ROWS.length - 1; i >= 0; i--) {
@@ -1351,15 +1538,16 @@ function renderTiles() {
   }
   var sinceH = lastFault ? (LAST.t - lastFault) / 3600e3 : null;
   var duty = (az.movingSec + es.movingSec) / (view.length * (STEP/1000)) * 100;
+  var dash = '—';
   $('tiles').innerHTML = [
-    ['Energy harvested', kwh<1 ? n(kwh,3) : n(kwh,1), 'kWh', 'array output over the window'],
+    ['Energy harvested', !HAS.power ? dash : kwh<1 ? n(kwh,3) : n(kwh,1), HAS.power ? 'kWh' : '', HAS.power ? 'array output over the window' : 'not wired yet · array output'],
     ['Telemetry received', n(clamp(view.length/expected*100,0,100),1), '%', view.length.toLocaleString() + ' of ' + expected.toLocaleString() + ' samples'],
-    ['Azimuth travel', n(az.degrees,0), '°', az.moves + ' discrete moves'],
-    ['Elevation travel', n(es.degrees,0), '°', es.moves + ' discrete moves'],
-    ['Motor duty', n(duty,1), '%', 'both axes energised and slewing'],
-    ['Protection events', String(az.stalls+es.stalls+az.oc+es.oc), '', (az.stalls+es.stalls) + ' stall · ' + (az.oc+es.oc) + ' over-current'],
+    ['Azimuth travel', HAS.counters ? n(az.degrees,0) : dash, HAS.counters ? '°' : '', HAS.counters ? cnt(az.moves) + ' discrete moves' : 'not wired yet · motion counters'],
+    ['Elevation travel', HAS.counters ? n(es.degrees,0) : dash, HAS.counters ? '°' : '', HAS.counters ? cnt(es.moves) + ' discrete moves' : 'not wired yet · motion counters'],
+    ['Motor duty', HAS.pos ? n(duty,1) : dash, HAS.pos ? '%' : '', HAS.pos ? 'both axes energised and slewing' : 'not wired yet · axis position'],
+    ['Protection events', HAS.counters ? cnt(az.stalls+es.stalls+az.oc+es.oc) : dash, '', HAS.counters ? cnt(az.stalls+es.stalls) + ' stall · ' + cnt(az.oc+es.oc) + ' over-current' : 'not wired yet · motion counters'],
     ['Since last fault', sinceH === null ? '—' : n(sinceH,1), sinceH === null ? '' : 'h', 'excludes scheduled wind stow'],
-    ['Lifetime moves', (az.totMoves+es.totMoves).toLocaleString(), '', 'az ' + az.totMoves.toLocaleString() + ' · el ' + es.totMoves.toLocaleString()]
+    ['Lifetime moves', HAS.counters ? cnt(az.totMoves+es.totMoves) : dash, '', HAS.counters ? 'az ' + cnt(az.totMoves) + ' · el ' + cnt(es.totMoves) : 'not wired yet · motion counters']
   ].map(function (t) {
     return '<div class="tile"><div class="k">' + t[0] + '</div><div class="v">' + t[1] + (t[2] ? '<span class="u">' + t[2] + '</span>' : '') + '</div><div class="d">' + t[3] + '</div></div>';
   }).join('');
@@ -1369,6 +1557,7 @@ function renderTiles() {
 /* ── motor health view ───────────────────────────────────────────── */
 function renderHealth() {
   var host = $('health'); host.innerHTML = '';
+  if (!HAS.motor) { host.innerHTML = notWired('Motor health', 'motor current, temperature and axis position'); return; }
   Object.keys(AXES).forEach(function (k) {
     var A = AXES[k], h = axisHealthFor(k), tr = trend(k);
     var card = el('div', 'card lift');
@@ -1394,11 +1583,11 @@ function renderHealth() {
 }
 function renderCounters() {
   var a = axisStats(view, 'az'), e = axisStats(view, 'el');
-  var rows = [['Moves', a.totMoves, e.totMoves], ['Travel (°)', Math.round(a.totDeg), Math.round(e.totDeg)],
+  var rows = [['Moves', a.totMoves, e.totMoves], ['Travel (°)', a.totDeg, e.totDeg],
     ['Stalls', a.totStalls, e.totStalls], ['Over-current trips', a.totOc, e.totOc]];
   rows.splice(2, 0, ['Direction reversals', a.totRev, e.totRev]);
   $('counters').innerHTML = '<table class="cnt"><thead><tr><th>Counter</th><th>Azimuth</th><th>Elevation</th></tr></thead><tbody>' +
-    rows.map(function (r) { return '<tr><td>' + r[0] + '</td><td>' + r[1].toLocaleString() + '</td><td>' + r[2].toLocaleString() + '</td></tr>'; }).join('') +
+    rows.map(function (r) { return '<tr><td>' + r[0] + '</td><td>' + cnt(r[1]) + '</td><td>' + cnt(r[2]) + '</td></tr>'; }).join('') +
     '</tbody></table>';
 }
 
@@ -1452,7 +1641,7 @@ function deriveEvents(rows) {
   for (var i = 0; i < rows.length; i++) {
     var r = rows[i], cur = r.faults;
 
-    if (i > 0 && r.t - rows[i - 1].t > STEP * 2.5) {
+    if (i > 0 && r.t - rows[i - 1].t > gapMs()) {
       out.push({ t: rows[i - 1].t, sev: 'warn', title: 'Telemetry gap', count: 1,
         detail: 'No contact for ' + n((r.t - rows[i - 1].t) / 60000, 0) +
                 ' min — buffered samples were not recovered', dur: '' });
@@ -1507,6 +1696,10 @@ function renderEvents() {
 var SESSION_EVENTS = [];
 /* Seeded from the site's last reported position in loadSiteData(). */
 var CTL = { mode: 'auto', estop: false, az: 0, el: 0, queue: [] };
+/* with no encoder reported CTL.az/el stay null (readouts show —); drawing and
+   the model still need a pose, so they use the home position */
+function ctlAz() { return CTL.az == null ? 90 : CTL.az; }
+function ctlEl() { return CTL.el == null ? 12 : CTL.el; }
 function issue(type, params, label) {
   var cmd = { id: 'cmd_' + Math.random().toString(16).slice(2,6), type: type, label: label, status: 'queued' };
   var reject = !canCommand() && type !== 'estop' ? 'your role (' + ROLE_WORD[ACCT.role].toLowerCase() + ') can watch but not command'
@@ -1572,7 +1765,7 @@ function skyPlot() {
     for (var mm = 0; mm < 1440; mm += 10) { var q2 = trjPose(CTL.path.points, mm, CTL.path.outside); if (!q2.outside) { var r2 = P(q2.az, q2.el); pl.push(r2[0].toFixed(1) + ',' + r2[1].toFixed(1)); } }
     if (pl.length > 1) h += '<polyline points="' + pl.join(' ') + '" fill="none" stroke="var(--ink)" stroke-width="1.6" opacity="' + (CTL.mode === 'path' ? .85 : .35) + '"/>';
   }
-  var p0 = P(CTL.az, CTL.el);
+  var p0 = P(ctlAz(), ctlEl());
   h += '<circle cx="' + p0[0] + '" cy="' + p0[1] + '" r="7" fill="none" stroke="var(--ink)" stroke-width="1.6"/><path d="M' + (p0[0] - 11) + ' ' + p0[1] + 'h5M' + (p0[0] + 6) + ' ' + p0[1] + 'h5M' + p0[0] + ' ' + (p0[1] - 11) + 'v5M' + p0[0] + ' ' + (p0[1] + 6) + 'v5" stroke="var(--ink)" stroke-width="1.4"/>';
   return h + '</svg><span class="tl">' + (LAST.sun_el > 0 ? 'Sky · sun and panel' : 'Sky · sun below horizon') + '</span>';
 }
@@ -1589,7 +1782,7 @@ function compass() {
   [['N', 0], ['E', 90], ['S', 180], ['W', 270]].forEach(function (q) { var A = q[1] * Math.PI / 180; h += '<text x="' + (c + 63 * Math.sin(A)) + '" y="' + (c - 63 * Math.cos(A) + 4.5) + '" text-anchor="middle" font-size="13" font-weight="600" fill="var(--ink)">' + q[0] + '</text>'; });
   h += '<circle cx="100" cy="100" r="44" fill="var(--card)" stroke="var(--line-2)"/>';
   if (LAST.sun_el > 0) { var S = LAST.sun_az * Math.PI / 180; h += '<circle cx="' + (c + 89 * Math.sin(S)) + '" cy="' + (c - 89 * Math.cos(S)) + '" r="4" fill="var(--accent)"/>'; }
-  h += '<g transform="rotate(' + CTL.az + ' 100 100)"><path d="M100 58 L108 100 L100 95 L92 100Z" fill="var(--ink)"/><path d="M100 142 L106 100 L100 105 L94 100Z" fill="var(--muted)" opacity=".5"/></g>';
+  h += '<g transform="rotate(' + ctlAz() + ' 100 100)"><path d="M100 58 L108 100 L100 95 L92 100Z" fill="var(--ink)"/><path d="M100 142 L106 100 L100 105 L94 100Z" fill="var(--muted)" opacity=".5"/></g>';
   return h + '<circle cx="100" cy="100" r="3" fill="var(--card)" stroke="var(--ink)"/></svg>';
 }
 function renderControl() {
@@ -1624,10 +1817,10 @@ function renderControl() {
     '<button class="mid" data-act="sun"' + (manual && sunUp ? '' : ' disabled') + ' title="Point straight at the sun">SUN</button></div>';
   h += '</div>';
   h += '<div class="cm-foot"><span class="lb">Go to</span>' +
-    '<input type="number" id="gaz" value="' + CTL.az.toFixed(1) + '" min="' + M.az_range[0] + '" max="' + M.az_range[1] + '" step="0.5" aria-label="Target azimuth">' +
-    '<input type="number" id="gel" value="' + CTL.el.toFixed(1) + '" min="' + M.el_range[0] + '" max="' + M.el_range[1] + '" step="0.5" aria-label="Target elevation">' +
+    '<input type="number" id="gaz" value="' + ctlAz().toFixed(1) + '" min="' + M.az_range[0] + '" max="' + M.az_range[1] + '" step="0.5" aria-label="Target azimuth">' +
+    '<input type="number" id="gel" value="' + ctlEl().toFixed(1) + '" min="' + M.el_range[0] + '" max="' + M.el_range[1] + '" step="0.5" aria-label="Target elevation">' +
     '<button class="btn" data-act="goto"' + dis + '>Send</button>' +
-    '<span class="note">Simulated against the recorded run &mdash; nothing is wired to hardware yet. Motion needs <b>manual</b> mode, as in the firmware. Arrow keys jog.</span></div>';
+    '<span class="note">Commands are not delivered to the tracker yet: the server does not queue them, so the board never receives these. Motion needs <b>manual</b> mode, as in the firmware. Arrow keys jog.</span></div>';
   h += '</div><div class="cm-side"><span class="hdg">' + n(CTL.az, 0) + '°</span>' + compass() +
     '<span class="coords">' + Math.abs(M.lat).toFixed(4) + '° ' + (M.lat >= 0 ? 'N' : 'S') + ' · ' + Math.abs(M.lon).toFixed(4) + '° ' + (M.lon >= 0 ? 'E' : 'W') + '</span>' +
     '<button class="clrbtn" data-act="clear_faults"' + (CTL.estop ? '' : ' disabled') + '>Clear faults</button>' +
@@ -1645,8 +1838,8 @@ function renderControl() {
     b.onclick = function () {
       var a = b.dataset.act;
       if (a === 'goto') {
-        var az = clamp(parseFloat($('gaz').value) || CTL.az, M.az_range[0], M.az_range[1]);
-        var ev = clamp(parseFloat($('gel').value) || CTL.el, M.el_range[0], M.el_range[1]);
+        var az = clamp(parseFloat($('gaz').value) || ctlAz(), M.az_range[0], M.az_range[1]);
+        var ev = clamp(parseFloat($('gel').value) || ctlEl(), M.el_range[0], M.el_range[1]);
         issue('goto', { az: az, el: ev }, 'az ' + az.toFixed(1) + '° / el ' + ev.toFixed(1) + '°');
       } else if (a === 'sun') {
         var saz = clamp(LAST.sun_az, M.az_range[0], M.az_range[1]), sel = clamp(LAST.sun_el, M.el_range[0], M.el_range[1]);
@@ -1655,7 +1848,7 @@ function renderControl() {
       else issue(a, {}, { home:'return to home position', stow:'drive to stow (flat)', clear_faults:'clear latched faults' }[a]);
     };
   });
-  dispatchEvent(new CustomEvent('hw:pose', { detail: { az: CTL.az, el: CTL.el } }));
+  dispatchEvent(new CustomEvent('hw:pose', { detail: { az: ctlAz(), el: ctlEl() } }));
   $('queue').innerHTML = CTL.queue.length ? CTL.queue.map(function (c) {
     return '<div class="cmd"><span><code>' + c.id + '</code> &nbsp;' + c.label + '</span><span class="st ' + c.status + '">' + c.status + '</span></div>';
   }).join('') : '<div class="none">Nothing queued. Commands wait here until the tracker checks in.</div>';
@@ -1715,7 +1908,7 @@ function trjPose(pts, m, outside) {
   }
   return { az: s[s.length - 1].az, el: s[s.length - 1].el, outside: false };
 }
-function trjPoseNow() { return CTL.path ? trjPose(CTL.path.points, rowMin(LAST), CTL.path.outside) : { az: CTL.az, el: CTL.el }; }
+function trjPoseNow() { return CTL.path ? trjPose(CTL.path.points, rowMin(LAST), CTL.path.outside) : { az: ctlAz(), el: ctlEl() }; }
 /* the most recent day with daylight in the record: the sun and irradiance the preview runs against */
 var _tday = null;
 function trjDay() {
@@ -1955,15 +2148,15 @@ function trjParseCsv(txt) {
   });
   return out;
 }
-function trjStopPlay() { if (TRJ.play) { clearInterval(TRJ.play); TRJ.play = null; dispatchEvent(new CustomEvent('hw:pose', { detail: { az: CTL.az, el: CTL.el } })); } var b = $('trjPlay'); if (b) b.textContent = 'Play on model'; }
+function trjStopPlay() { if (TRJ.play) { clearInterval(TRJ.play); TRJ.play = null; dispatchEvent(new CustomEvent('hw:pose', { detail: { az: ctlAz(), el: ctlEl() } })); } var b = $('trjPlay'); if (b) b.textContent = 'Play on model'; }
 function trjTeachRefresh() {
   var r = $('teachRead'); if (r) r.innerHTML = n(CTL.az, 1) + '°<small>az</small> ' + n(CTL.el, 1) + '°<small>el</small>';
-  var w = $('teachDir'); if (w) w.textContent = 'facing ' + compassWord(CTL.az);
+  var w = $('teachDir'); if (w) w.textContent = 'facing ' + (CTL.az == null ? 'unknown' : compassWord(CTL.az));
 }
 function trjTeachSave() {
   var t = $('teachT') ? $('teachT').value : TRJ.teachT, m = tMin(t); if (m === null) return;
   TRJ.pts = TRJ.pts.filter(function (p) { return tMin(p.t) !== m; });
-  TRJ.pts.push({ t: minStr(m), az: +CTL.az.toFixed(1), el: +CTL.el.toFixed(1) });
+  TRJ.pts.push({ t: minStr(m), az: +ctlAz().toFixed(1), el: +ctlEl().toFixed(1) });
   TRJ.pts.sort(function (a, b) { return tMin(a.t) - tMin(b.t); });
   TRJ.intent = 'custom'; TRJ.teachT = minStr(Math.min(1439, m + 60)); trjSave(); renderTrajectory();
 }
@@ -2204,6 +2397,11 @@ function efShow(i) {
 }
 function efStop() { if (EF.timer) { clearInterval(EF.timer); EF.timer = null; } var b = $('efPlay'); if (b) { b.setAttribute('aria-pressed', 'false'); b.textContent = 'Play the day'; } }
 function renderEnergy() {
+  var none = !HAS.power && !HAS.cur && !HAS.volt, sec = document.querySelector('[data-view="energy"]');
+  sec.querySelector('.ef').hidden = none; $('efKpi').hidden = none;
+  var nb = $('efNone'); if (!nb) { nb = el('div'); nb.id = 'efNone'; sec.insertBefore(nb, sec.firstChild); }
+  nb.innerHTML = none ? notWired('Where the power goes', 'array output, pack voltage and motor current') : '';
+  if (none) return;
   if (!EF.built) efBuild();
   var rows = view, sc = $('efScrub');
   sc.max = rows.length - 1;
@@ -2235,22 +2433,32 @@ function renderEnergy() {
 }
 
 /* ── the single tracker ──────────────────────────────────────────── */
-function loadSiteData(id) {
+function loadSiteData(id, refresh) {
   siteId = id;
   D = SITES[id]; M = D.meta; C = D.cols;
   ROWS = unpack(id);
   LAST = ROWS[ROWS.length - 1];
   STEP = (M.interval_s || 60) * 1000;
+  sensed();
   AXES = {
     az: { name: 'Azimuth', col: 'var(--az)', limit: M.az_limit_a, band: M.deadband.az, range: M.az_range },
     el: { name: 'Elevation', col: 'var(--el)', limit: M.el_limit_a, band: M.deadband.el, range: M.el_range }
   };
   buildFaultMeta();
-  CTL.az = LAST.az_pos; CTL.el = LAST.el_pos; CTL.queue = [];
+  if (!refresh) { CTL.az = LAST.az_pos; CTL.el = LAST.el_pos; CTL.queue = []; }
   computeBaseline();
   setWindow(hours);
   dispatchEvent(new CustomEvent('hw:site', { detail: id }));
 }
+/* web/live.js swaps in a fresh payload as new samples arrive */
+addEventListener('hw:data', function (e) {
+  if (e.detail !== siteId) return;
+  var before = JSON.stringify(HAS);
+  loadSiteData(siteId, true);           /* keeps the operator's pose and command queue */
+  if (JSON.stringify(HAS) !== before) rebuildCharts();
+  renderAll();
+  if (current !== 'status' && VIEWS[current] && VIEWS[current][1]) VIEWS[current][1]();
+});
 function axisHealthFor(k) { return health(view, k); }
 
 /* Read by the 3D tab's component inspector, so a part's status uses exactly
@@ -2344,6 +2552,7 @@ async function acctAfterSignIn(user) {
   ACCT.user = user; ACCT.mode = 'signedin';
   await ACCT.sb.rpc('accept_my_invites');
   await acctReload();
+  devPoll();
 }
 async function acctReload() {
   var sb = ACCT.sb, uid = ACCT.user.id;
@@ -2374,6 +2583,49 @@ async function acctRun(fn, okMsg) {
   ACCT.busy = false;
   if (ACCT.mode === 'signedin') await acctReload(); else { if (ACCT.mode === 'demo') demoSync(); acctPaint(); }
 }
+
+/* ── live device card (Status tab) ──
+   The team's real trackers, as the ingest function last heard from them. The
+   rest of the console draws the same telemetry; this card is about the board
+   itself and its link. Polled every 5 s while signed in. */
+var DEV = { trackers: null, err: '' };
+window.HW_DEV = DEV;                       /* the 3D inspector's controller panel reads this too */
+var DEV_ONLINE_S = 30;                     /* posts are ~5 s apart, but a slow TLS handshake can stretch one past 20 s */
+function devAgo(s) { return s < 60 ? Math.round(s) + ' s ago' : s < 3600 ? Math.round(s / 60) + ' min ago' : s < 86400 ? Math.round(s / 3600) + ' h ago' : Math.round(s / 86400) + ' d ago'; }
+function devUptime(s) { var h = Math.floor(s / 3600), m = Math.floor(s % 3600 / 60); return h ? h + ' h ' + m + ' min' : m ? m + ' min ' + (s % 60) + ' s' : s + ' s'; }
+async function devPoll() {
+  if (ACCT.mode !== 'signedin' || !ACCT.team) { devPaint(); return; }
+  var r = await ACCT.sb.from('trackers').select('device_id, name, site, last_seen_at, last_sample').eq('team_id', ACCT.team.id).order('created_at');
+  DEV.err = r.error ? r.error.message : ''; DEV.trackers = r.data || [];
+  devPaint();
+}
+function devPaint() {
+  var el = $('devlive'); if (!el) return;
+  var row = function (k, v) { return '<div class="row"><span class="k">' + k + '</span><span class="v">' + v + '</span></div>'; };
+  if (ACCT.mode === 'demo') { el.innerHTML = '<div class="card"><p class="cap">Live hardware shows here once the console is connected to the account server. In demo mode only the recorded week is available.</p></div>'; return; }
+  if (DEV.err) { el.innerHTML = '<div class="card"><div class="heard bad">' + esc(DEV.err) + '</div></div>'; return; }
+  if (!DEV.trackers) { el.innerHTML = '<div class="card"><p class="cap">Checking for devices…</p></div>'; return; }
+  if (!DEV.trackers.length) { el.innerHTML = '<div class="card"><p class="cap">No trackers are registered to ' + esc(ACCT.team.name) + ' yet.</p></div>'; return; }
+  el.innerHTML = DEV.trackers.map(function (t) {
+    var age = t.last_seen_at ? (Date.now() - Date.parse(t.last_seen_at)) / 1000 : null;
+    var on = age != null && age < DEV_ONLINE_S;
+    var badge = age == null ? '<span class="badge warn">Never connected</span>' : on ? '<span class="badge good">Online</span>' : '<span class="badge crit">Offline</span>';
+    var s = t.last_sample || {}, d = s.device || {}, a = d.analog_raw || {};
+    var h = '<div class="card"><div class="ttl"><span>' + esc(t.name || t.device_id) + '</span>' + badge + '</div><div class="rows" style="margin-top:10px">' +
+      row('Device', esc(t.device_id)) + row('Last heard', age == null ? '&mdash;' : devAgo(age));
+    if (age != null) h +=
+      row('Board', esc(d.board || '—')) + row('Firmware', esc(s.fw || '—')) + row('Mode', esc(s.mode || '—')) +
+      row('Uptime', d.uptime_s != null ? devUptime(d.uptime_s) : '&mdash;') +
+      row('Wi-Fi signal', d.rssi_dbm != null ? d.rssi_dbm + ' dBm' : '&mdash;') + row('IP address', esc(d.ip || '—')) +
+      row('Sample #', s.seq != null ? s.seq : '&mdash;') +
+      row('Analog A0–A3 (raw)', ['A0', 'A1', 'A2', 'A3'].map(function (k) { return a[k] != null ? a[k] : '–'; }).join(' · ')) +
+      row('Azimuth / elevation', s.axes && s.axes.az && s.axes.az.pos_deg != null ? s.axes.az.pos_deg + '° / ' + (s.axes.el ? s.axes.el.pos_deg : '–') + '°' : 'no encoder yet');
+    return h + '</div></div>';
+  }).join('');
+}
+/* this script is wrapped in a function, so the inspector gets the helpers through DEV */
+DEV.onlineS = DEV_ONLINE_S; DEV.ago = devAgo; DEV.uptime = devUptime; DEV.esc = esc;
+setInterval(devPoll, 5000);
 
 /* ── the sign-in page ── */
 function gateHTML() {
@@ -2472,8 +2724,8 @@ function teamHTML() {
   if (!demo && mg) h += '<div class="card"><h3>Test the whole team</h3><p class="cap">Sends a test alert to all ' + ACCT.roster.length + ' members on the channels each one chose, exactly as a real fault would. Results show under Recent alerts sent. Once every 5 minutes.</p>' +
     '<div class="trj-row"><button class="btn primary" id="teamTest"' + (ACCT.busy ? ' disabled' : '') + '>Send test to everyone</button><button class="btn" id="refreshLog">Refresh results</button></div></div>';
   /* console data for the published site */
-  if (!demo && mg && window.HW_SITES && !window.HW_PUBLIC) h += '<div class="card"><h3>Console data for the website</h3><p class="cap">The published site holds no tracker data; members download it after signing in. Upload this console’s telemetry and 3D model so they can.</p>' +
-    '<div class="trj-row"><button class="btn primary" id="pushData"' + (ACCT.busy ? ' disabled' : '') + '>Upload console data</button></div></div>';
+  if (!demo && mg && window.HW_CAD && !window.HW_PUBLIC) h += '<div class="card"><h3>3D model for the website</h3><p class="cap">The published site does not carry the CAD model; members download it after signing in. Telemetry needs no upload: the site reads it live from the tracker. Upload this console’s 3D model so members see it.</p>' +
+    '<div class="trj-row"><button class="btn primary" id="pushData"' + (ACCT.busy ? ' disabled' : '') + '>Upload 3D model</button></div></div>';
   /* texts */
   h += '<div class="card"><h3>Recent alerts sent</h3><p class="cap">Every text and email the team was sent, and whether it went out.</p>' +
     (ACCT.texts.length ? '<div class="mem">' + ACCT.texts.map(function (t) {
@@ -2519,8 +2771,7 @@ function bindTeam(host) {
     acctRun(async function () {
       var b64 = String(window.HW_CAD || '').split(',').pop(), bin = atob(b64), glb = new Uint8Array(bin.length);
       for (var i = 0; i < bin.length; i++) glb[i] = bin.charCodeAt(i);
-      var files = [['sites.json', new Blob([JSON.stringify(window.HW_SITES)], { type: 'application/json' })],
-                   ['kinematics.json', new Blob([JSON.stringify(window.HW_KIN)], { type: 'application/json' })],
+      var files = [['kinematics.json', new Blob([JSON.stringify(window.HW_KIN)], { type: 'application/json' })],
                    ['tracker.glb', new Blob([glb], { type: 'model/gltf-binary' })]];
       for (var k = 0; k < files.length; k++) {
         var r = await sb.storage.from('console').upload(files[k][0], files[k][1], { upsert: true, contentType: files[k][1].type });
@@ -2613,7 +2864,7 @@ var VIEWS = {
   team:    ['Team & alerts', function () { acctPaint(); }]
 };
 var SUBS = {
-  twin:    'New Mexico Tech, Socorro · replaying the recorded week · click any part',
+  twin:    'New Mexico Tech, Socorro · live telemetry from the tracker · click any part',
   status:  'Live readings and the headline wear signal',
   health:  'Per-axis condition, scored against the commissioning baseline',
   trends:  'Five measurements across the selected window',
@@ -2645,10 +2896,10 @@ function renderAll() {
   renderNow(); renderTiles(); renderHealth(); renderCounters(); renderEvents();
   if (current === 'energy') renderEnergy();
   /* the tab badge used to come from the fleet banner, which is gone */
-  var worst = Math.min(health(view, 'az').score, health(view, 'el').score);
-  setText('c-health', worst);
+  var worst = HAS.motor ? Math.min(health(view, 'az').score, health(view, 'el').score) : null;
+  setText('c-health', worst === null ? '' : worst);
   var ch = $('c-health');
-  if (ch) ch.className = 'count' + (worst < 70 ? ' hot' : '');
+  if (ch) { ch.className = 'count' + (worst !== null && worst < 70 ? ' hot' : ''); ch.hidden = worst === null; }
   drawAll();
 }
 document.querySelectorAll('[data-nav]').forEach(function (b) { b.onclick = function () { show(b.dataset.nav); }; });
@@ -2754,7 +3005,12 @@ function useData(payload, name){
   for(let i=0;i<N;i++){ t += P.cols.dt[i]; T[i] = t; }
   ($("srcName")||{}).textContent = name || P.meta.device_id;
   ($("siteName")||{}).textContent = P.meta.label || P.meta.site;
-  buildDayButtons(); simT = startTime(); idx = 0;
+  /* live data is swapped in every few seconds: start once, then keep the
+     playhead where the viewer left it, or on the newest sample when following */
+  const first = !useData.done; useData.done = true;
+  buildDayButtons(); idx = 0;
+  if (first) simT = startTime();
+  if (typeof LIVE !== "undefined" && LIVE) simT = T[N-1];
   recompute();
 }
 function startTime(){ // first clear-sky late morning — a meaningful frame at rest
@@ -2854,7 +3110,7 @@ function analyse(){
     azTmax=Math.max(azTmax,C.az_temp_c[i]||0); elTmax=Math.max(elTmax,C.el_temp_c[i]||0);
     if(i>0){
       const dt=T[i]-T[i-1];
-      if(dt>3*INT){ d.gapMin += dt/60; ev.push({t:T[i-1], kind:"gap", sev:"warn", title:`Telemetry gap · ${Math.round(dt/60)} min`, detail:"No rows received — energy for this window is not counted"}); }
+      if(dt>Math.max(3*INT, 60)){ d.gapMin += dt/60; ev.push({t:T[i-1], kind:"gap", sev:"warn", title:`Telemetry gap · ${Math.round(dt/60)} min`, detail:"No rows received — energy for this window is not counted"}); }
       if(C.sun_el_deg[i]>10 && C.sun_el_deg[i-1]>10 && dt<=2*INT){
         let da=Math.abs(C.sun_az_deg[i]-C.sun_az_deg[i-1]); if(da>180) da=360-da; sunMaxRate=Math.max(sunMaxRate, da/dt);
       }
@@ -2916,7 +3172,7 @@ function analyse(){
 /* ============================================================
    REPORT RENDER
    ============================================================ */
-const fx=(v,n=1)=>Number(v).toFixed(n), pct=v=>`${fx(v*100,0)}%`;
+const fx=(v,n=1)=>v==null||isNaN(v)?"—":Number(v).toFixed(n), pct=v=>`${fx(v*100,0)}%`;
 const grade=(v,good,warn,hiGood=true)=> hiGood ? (v>=good?"good":v>=warn?"warn":"crit") : (v<=good?"good":v<=warn?"warn":"crit");
 const TAG={good:"Meets target",warn:"Marginal",crit:"Fails"};
 function renderReport(){
@@ -3578,6 +3834,7 @@ addEventListener("hw:stage", () => {
    listener above existed. Seed from the DOM rather than waiting for the next. */
 { const sec = document.querySelector('[data-view="twin"]'); TWIN_VISIBLE = !!sec && !sec.hidden; }
 adopt(window.HW_TWIN_SITE || Object.keys(window.HW_SITES)[0]);
+setLive(true);                             /* the console follows the tracker as it reports */
 /* ══ components ═════════════════════════════════════════════════════
    Every part of the tracker: what it is, what the telemetry can actually say
    about it, and how it is doing at this moment. Where a part has no sensor,
@@ -3634,6 +3891,19 @@ function partStatus(k, i){
   const tMs = T[i]*1000;
   const axh = ax => ({h: H.health(ax, tMs), s: H.stats(ax, tMs)});
 
+  /* a part whose readings the tracker does not send yet says so */
+  const sent = c => C[c] && C[c].some(v => v != null);
+  const NEEDS = {panel:[["panel_w","irradiance_wm2"],"array output and irradiance"], battery:[["supply_v"],"pack voltage"],
+    azMotor:[["az_current_a","az_temp_c"],"azimuth motor current and temperature"], elMotor:[["el_current_a","el_temp_c"],"elevation motor current and temperature"],
+    yoke:[["az_pos_deg"],"azimuth position"], holder:[["el_pos_deg"],"elevation position"], shaft:[["az_moves"],"azimuth motion counters"],
+    base:[["wind_ms"],"wind speed"], ldr:[["irradiance_wm2"],"irradiance"], switch:[["supply_v"],"pack voltage"],
+    sensor:[["az_current_a","el_current_a"],"motor current"]};
+  if(NEEDS[k] && !NEEDS[k][0].some(sent)){
+    out.head = "Not wired yet"; out.live = true;
+    out.note = `The tracker is online but does not send ${NEEDS[k][1]} yet. This fills in once the firmware reports it.`;
+    return out;
+  }
+
   switch(k){
     case "panel": {
       const cosT = (sunUp && irr > 30)
@@ -3660,11 +3930,11 @@ function partStatus(k, i){
       out.tier = scoreTier(h.score);
       out.head = fx(cur,2)+" A"; out.unit = "load current now";
       out.rows = [["Health score", h.score+" / 100"],
-        ["Healthy envelope (sim)", fx(meta[ax+"_limit_a"],2)+" A"],
+        ["Healthy envelope", fx(meta[ax+"_limit_a"],2)+" A"],
         ["Ordered motor rating", "0.70 A (N20)"],
         ["Temperature", fx(C[ax+"_temp_c"][i],0)+" °C"],
         ["Stalls · over-current", s.stalls+" · "+s.oc]];
-      out.note = "Current and temperature are simulated for this run. The ordered N20 is rated 0.70 A, below the envelope used here, so these readings do not describe that motor yet.";
+      out.note = "Measured at the tracker. The ordered N20 is rated 0.70 A; the healthy envelope is the team's design figure.";
       break; }
     case "yoke": case "holder": {
       const ax = k==="yoke" ? "az" : "el", {h,s} = axh(ax);
@@ -3697,14 +3967,30 @@ function partStatus(k, i){
       out.note = "Sun sensing. Not part of motor health.";
       break;
     case "controller": {
+      /* the real board, when one is reporting: its link, not the recorded week */
+      const D = window.HW_DEV, live = (D && D.trackers || []).find(t => t.last_seen_at);
+      if(live){
+        const {esc, ago: devAgo, uptime: devUptime} = D;
+        const age = (Date.now() - Date.parse(live.last_seen_at))/1000, on = age < D.onlineS;
+        const ls = live.last_sample || {}, d = ls.device || {};
+        out.live = true;
+        out.tier = on ? "good" : "crit";
+        out.head = on ? "ONLINE" : "OFFLINE"; out.unit = "live link · " + esc(live.device_id);
+        out.rows = [["Last heard", devAgo(age)], ["Mode", esc((ls.mode||"—").toUpperCase())],
+          ["Wi-Fi signal", d.rssi_dbm != null ? d.rssi_dbm+" dBm" : "—"],
+          ["Uptime", d.uptime_s != null ? devUptime(d.uptime_s) : "—"],
+          ["IP address", esc(d.ip||"—")], ["Firmware", esc(ls.fw||"—")]];
+        out.note = "Live from the board over Wi-Fi.";
+        break;
+      }
       const f = meta.faults[C.fault[i]] || "";
-      let gaps = 0; for(let j=1;j<C.dt.length;j++) if(C.dt[j] > 3*meta.interval_s) gaps++;
+      let gaps = 0; for(let j=1;j<C.dt.length;j++) if(C.dt[j] > Math.max(3*meta.interval_s, 60)) gaps++;
       out.tier = /stall|over_temp/.test(f) ? "crit" : f ? "warn" : "good";
       out.head = (meta.modes[C.mode[i]]||"—").toUpperCase(); out.unit = "controller mode";
       out.rows = [["Bus voltage", fx(supply,2)+" V"],
         ["Active faults", f ? f.replace(/;/g,", ").replace(/_/g," ") : "none"],
         ["Telemetry gaps on record", gaps], ["Firmware", meta.fw || "—"]];
-      out.note = "Reports mode and faults. The Wi-Fi link is simulated.";
+      out.note = "Reports mode and faults.";
       break; }
     case "switch":
       out.tier = supply > 5 ? "good" : "crit";
@@ -3846,8 +4132,9 @@ function renderInsp(force){
   box.dataset.empty = "";
   const d = PART_BY[SEL], s = partStatus(SEL, idx);
   const sig = SEL+"|"+s.tier+"|"+s.head+"|"+s.rows.map(r=>r[1]).join("|");
+  const spark = SPARK[SEL] && !s.live;     /* a recorded-week sparkline under live readings would mislead */
   if(!force && box.dataset.sig===sig){
-    if(SPARK[SEL]) drawSpark(document.getElementById("twSpark"), TIER_HEX[s.tier], P.cols[SPARK[SEL]], idx);
+    if(spark) drawSpark(document.getElementById("twSpark"), TIER_HEX[s.tier], P.cols[SPARK[SEL]], idx);
     return;
   }
   box.dataset.sig = sig;
@@ -3858,11 +4145,11 @@ function renderInsp(force){
     `<div class="tw-sub">${d.sub}</div>`+
     `<span class="tw-badge ${s.tier}">${TIER_WORD[s.tier]}</span>`+
     `<div class="tw-big">${s.head}${s.unit ? `<small>${s.unit}</small>` : ""}</div>`+
-    (SPARK[SEL] ? `<canvas class="tw-spark" id="twSpark"></canvas>` : "")+
+    (spark ? `<canvas class="tw-spark" id="twSpark"></canvas>` : "")+
     `<dl class="tw-rows">${s.rows.map(r=>`<dt>${r[0]}</dt><dd>${r[1]}</dd>`).join("")}</dl>`+
     `<p class="tw-note">${s.note}</p>`;
   document.getElementById("twBack").onclick = () => setSel(null, true);
-  if(SPARK[SEL]) drawSpark(document.getElementById("twSpark"), TIER_HEX[s.tier], P.cols[SPARK[SEL]], idx);
+  if(spark) drawSpark(document.getElementById("twSpark"), TIER_HEX[s.tier], P.cols[SPARK[SEL]], idx);
 }
 
 /* ── live readings pinned to the model, SCADA style ───────────────────── */
