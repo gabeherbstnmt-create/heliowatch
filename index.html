@@ -222,6 +222,7 @@ input[type=number]:focus{outline:none;border-color:var(--accent)}
 .cmd{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:12px 0;border-bottom:1px solid var(--line);font-size:13.5px}
 .cmd:last-child{border-bottom:0}
 .cmd code{font-size:12px;color:var(--muted)}
+.cmd .cmd-d{display:block;color:var(--ink-2);font-size:12px;margin-top:3px;line-height:1.45}
 .st{font-size:11.5px;font-weight:500;padding:3px 9px;border-radius:6px;background:var(--sunken)}
 .st.queued{color:var(--muted)}.st.sent{color:var(--az)}.st.done{color:var(--good-ink);background:var(--good-bg)}
 .st.rejected,.st.expired{color:var(--crit-ink);background:var(--crit-bg)}
@@ -640,7 +641,7 @@ input.scrub::-moz-range-thumb{width:14px;height:14px;border-radius:50%;backgroun
 </style>
 
 <div class="gate" id="gate" hidden></div>
-<div class="verbadge" id="verBadge" title="HelioWatch 1.0.0, built Oct 29, 2026 from commit 990009e">v1.0.0 · 990009e · Oct 29, 2026</div>
+<div class="verbadge" id="verBadge" title="HelioWatch 1.0.0, built Oct 29, 2026 from commit bdca062">v1.0.0 · bdca062 · Oct 29, 2026</div>
 <div class="app">
 <nav class="rail" id="tabs" aria-label="Sections">
   <div class="mark" title="HelioWatch"><svg width="28" height="28" viewBox="0 0 26 26" aria-hidden="true">
@@ -760,6 +761,7 @@ input.scrub::-moz-range-thumb{width:14px;height:14px;border-radius:50%;backgroun
         <div class="cap">Enforced by the tracker firmware, not by this page.</div>
         <div class="rows" id="interlocks" style="margin-top:8px"></div></div>
     </div>
+    <div class="card" id="boardctl" style="margin-top:14px"></div>
   </section>
 
   <!-- 3D MODEL -->
@@ -808,12 +810,12 @@ input.scrub::-moz-range-thumb{width:14px;height:14px;border-radius:50%;backgroun
    shows the real machine. A reading the tracker does not send yet stays null,
    and the console shows it as missing rather than as zero. The sun's position
    is computed from the time and the site, which is astronomy, not a guess.
-   It then polls for new samples and tells the console to redraw.          */
+   It then polls for new samples every 5 s and tells the console to redraw. */
 (function () {
   'use strict';
   var WINDOW_H = 24;                   /* history loaded at sign-in */
   var PAGE = 1000;                     /* PostgREST's row cap per request */
-  var POLL_MS = 15000;
+  var POLL_MS = 5000;
 
   /* the machine's own limits, from the team's design (not measurements) */
   var MACHINE = {
@@ -909,7 +911,7 @@ input.scrub::-moz-range-thumb{width:14px;height:14px;border-radius:50%;backgroun
 
   /* -> { sites, tracker } or { error }. Picks the team's first tracker that has reported. */
   window.hwLiveSites = async function (sb) {
-    var tr = await sb.from('trackers').select('id, device_id, name, site, lat, lon, last_seen_at').order('created_at');
+    var tr = await sb.from('trackers').select('id, team_id, device_id, name, site, lat, lon, last_seen_at').order('created_at');
     if (tr.error) return { error: tr.error.message };
     var list = (tr.data || []).filter(function (t) { return t.last_seen_at; });
     if (!(tr.data || []).length) return { error: 'No tracker is registered to your team yet.' };
@@ -1700,36 +1702,133 @@ var CTL = { mode: 'auto', estop: false, az: 0, el: 0, queue: [] };
    the model still need a pose, so they use the home position */
 function ctlAz() { return CTL.az == null ? 90 : CTL.az; }
 function ctlEl() { return CTL.el == null ? 12 : CTL.el; }
+/* ── commands ────────────────────────────────────────────────────
+   A command is a row in public.commands. The ingest function hands it to the
+   tracker in the reply to its next telemetry post (about 5 s), and the
+   tracker's ack moves it to accepted / completed / rejected. Nothing here
+   pretends the tracker acted: the queue shows exactly what the board said. */
+var CMD_TTL_S = 60, CMD_OTA_S = 600;
+var CMD_WORD = { queued: 'queued', sent: 'sent', accepted: 'accepted', completed: 'done', failed: 'failed',
+  rejected: 'rejected', expired: 'expired', stale: 'no reply' };
+var CMD_CLS = { queued: 'queued', sent: 'sent', accepted: 'done', completed: 'done', failed: 'rejected',
+  rejected: 'rejected', expired: 'rejected', stale: 'rejected' };
+CTL.local = []; CTL.modeAt = 0; CTL.seen = {};
+function cmdTracker() { var L = window.HW_LIVE; return L && L.tr && ACCT.sb && ACCT.mode === 'signedin' ? L.tr : null; }
 function issue(type, params, label) {
-  var cmd = { id: 'cmd_' + Math.random().toString(16).slice(2,6), type: type, label: label, status: 'queued' };
-  var reject = !canCommand() && type !== 'estop' ? 'your role (' + ROLE_WORD[ACCT.role].toLowerCase() + ') can watch but not command'
-             : CTL.estop && type !== 'clear_faults' ? 'emergency stop latched'
+  var reject = !cmdTracker() ? 'not connected to the tracker'
+             : type === 'ota' && !canManage() ? 'only owners and admins can update firmware'
+             : !canCommand() && type !== 'estop' ? 'your role (' + ROLE_WORD[ACCT.role].toLowerCase() + ') can watch but not command'
+             : CTL.estop && ['clear_faults', 'estop', 'led', 'reboot', 'ota'].indexOf(type) < 0 ? 'emergency stop latched'
              : (type === 'jog' || type === 'goto') && CTL.mode !== 'manual' ? 'motion requires manual mode' : null;
-  CTL.queue.unshift(cmd); CTL.queue = CTL.queue.slice(0, 7);
-  renderControl();
-  if (reject) { setTimeout(function () { cmd.status = 'rejected'; cmd.label += ' — ' + reject; renderControl(); }, 650); return; }
-  /* Mirrors the real round trip in docs/TELEMETRY_API.md: a command waits for
-     the tracker's next check-in, then comes back acknowledged. */
-  setTimeout(function () {
-    cmd.status = 'sent';
-    /* Delivered — the tracker acts now; the ack below only confirms it. */
-    if (type === 'jog') CTL[params.axis] = clamp(CTL[params.axis] + params.d, AXES[params.axis].range[0], AXES[params.axis].range[1]);
-    if (type === 'goto') { CTL.az = params.az; CTL.el = params.el; }
-    if (type === 'home') { CTL.az = 90; CTL.el = 12; }
-    if (type === 'stow') { CTL.az = 180; CTL.el = 5; CTL.mode = 'stow'; }
-    if (type === 'estop') { CTL.estop = true; CTL.mode = 'fault'; }
-    if (type === 'clear_faults') { CTL.estop = false; CTL.mode = 'auto'; }
-    if (type === 'trajectory') { CTL.path = params; CTL.mode = 'path'; var pp = trjPoseNow(); CTL.az = pp.az; CTL.el = pp.el; }
-    if (type === 'cancel_path') { CTL.mode = 'auto'; }
-    renderControl(); trjTeachRefresh();
-  }, 230);
-  setTimeout(function () {
-    cmd.status = 'done';
-    SESSION_EVENTS.push({ t: LAST.t, sev: type === 'estop' ? 'crit' : 'info',
-      title: 'Operator command · ' + type, detail: label + ' — acknowledged by tracker', dur: '' });
-    renderControl(); renderEvents();
-    if (type === 'trajectory' || type === 'cancel_path') renderTrajectory();
-  }, 820);
+  if (reject) {
+    CTL.local.unshift({ id: '—', label: label + ' — ' + reject, status: 'rejected', at: Date.now() });
+    renderQueue(); return Promise.resolve(false);
+  }
+  var tr = cmdTracker(), tmp = { id: '…', label: label, status: 'queued', at: Date.now() };
+  CTL.local.unshift(tmp); renderQueue();
+  if (type === 'trajectory') CTL.path = params;          /* drawn on the sky plot as sent */
+  return ACCT.sb.from('commands').insert({ team_id: tr.team_id, tracker_id: tr.id, type: type, params: params || {}, label: label,
+    expires_at: new Date(Date.now() + (type === 'ota' ? CMD_OTA_S : CMD_TTL_S) * 1000).toISOString() }).then(function (r) {
+    CTL.local = CTL.local.filter(function (x) { return x !== tmp; });
+    if (r.error) CTL.local.unshift({ id: '—', label: label + ' — ' + r.error.message, status: 'rejected', at: Date.now() });
+    return cmdPoll().then(function () { return !r.error; });
+  });
+}
+/* the board's word on mode and e-stop wins, unless an ack is newer than its last sample */
+function cmdApply(c) {
+  var t = Date.parse(c.finished_at || c.created_at), p = c.params || {};
+  if (t <= CTL.modeAt || (c.status !== 'completed' && c.status !== 'accepted')) return;
+  if (c.type === 'set_mode') CTL.mode = p.mode;
+  else if (c.type === 'estop') { CTL.estop = true; CTL.mode = 'fault'; }
+  else if (c.type === 'clear_faults') { CTL.estop = false; CTL.mode = 'idle'; }
+  else if (c.type === 'stow') CTL.mode = 'stow';
+  else if (c.type === 'trajectory') CTL.mode = 'path';
+  else if (c.type === 'cancel_path') CTL.mode = 'auto';
+  else return;
+  CTL.modeAt = t;
+}
+var cmdBusy = false, cmdLast = 0;
+function cmdPoll() {
+  var tr = cmdTracker(); if (!tr || cmdBusy) return Promise.resolve();
+  cmdBusy = true; cmdLast = Date.now();
+  return ACCT.sb.from('commands').select('id, type, params, label, status, detail, created_at, finished_at')
+    .eq('tracker_id', tr.id).order('created_at', { ascending: false }).limit(40).then(function (r) {
+    cmdBusy = false;
+    if (r.error) return;
+    var rows = r.data || [], before = CTL.mode + CTL.estop;
+    rows.slice().reverse().forEach(cmdApply);
+    CTL.queue = rows.slice(0, 8);
+    /* finished commands appear in Events, as the tracker reported them */
+    SESSION_EVENTS = rows.filter(function (c) { return c.finished_at || c.status === 'accepted'; }).map(function (c) {
+      return { t: Date.parse(c.finished_at || c.created_at), sev: c.type === 'estop' ? 'crit' : /failed|rejected|stale|expired/.test(c.status) ? 'warn' : 'info',
+        title: 'Operator command · ' + c.type, detail: c.label + ' — ' + CMD_WORD[c.status] + (c.detail ? ': ' + c.detail : ''), dur: '' };
+    });
+    CTL.local = CTL.local.filter(function (x) { return Date.now() - x.at < 15000; });
+    if (CTL.mode + CTL.estop !== before && current === 'control') renderControl(); else renderQueue();
+    if (current === 'events') renderEvents();
+  }, function () { cmdBusy = false; });
+}
+/* every 3 s while something is in flight or the Control tab is open, otherwise every 15 s */
+setInterval(function () {
+  var busy = (CTL.queue || []).some(function (c) { return c.status === 'queued' || c.status === 'sent'; });
+  if (busy || current === 'control' || Date.now() - cmdLast > 15000) cmdPoll();
+}, 3000);
+/* the board itself: a visible LED test, a restart, and firmware over Wi-Fi.
+   Redrawn only when what it shows changes, so a chosen file is not lost. */
+var OTA_MAGIC = 0x23410266;               /* Giga, as scripts/make_ota.py writes it */
+function renderBoard() {
+  var host = $('boardctl'); if (!host) return;
+  var t = (DEV.trackers || []).find(function (x) { return x.device_id === M.device_id; }) || {};
+  var s = t.last_sample || {}, d = s.device || {}, bl = d.bootloader, mg = canManage(), op = canCommand();
+  var sig = [s.fw, bl, d.led, mg, op, !!cmdTracker(), BOARD_MSG].join('|');
+  if (host.dataset.sig === sig) return;
+  host.dataset.sig = sig;
+  var row = function (k, v) { return '<div class="row"><span class="k">' + k + '</span><span class="v">' + v + '</span></div>'; };
+  var h = '<h3>Board</h3><p class="cap">The Arduino Giga itself. The LED is a quick way to check, from anywhere, that commands reach it.</p>' +
+    '<div class="rows" style="margin-top:8px">' + row('Firmware', esc(s.fw || '—')) +
+    row('Bootloader', bl == null ? '—' : 'v' + bl + (bl >= 22 ? ' · can update over Wi-Fi' : ' · too old for updates over Wi-Fi')) +
+    row('LED', esc(d.led || '—')) + '</div>' +
+    '<div class="trj-row" style="margin-top:12px">' + ['off', 'red', 'green', 'blue'].map(function (c) {
+      return '<button class="btn" data-led="' + c + '"' + (op ? '' : ' disabled') + '>LED ' + c + '</button>'; }).join('') +
+    '<button class="btn" id="bdReboot"' + (op ? '' : ' disabled') + '>Restart board</button></div>';
+  if (mg) h += '<h3 style="margin-top:24px">Update firmware over Wi-Fi</h3><p class="cap">Build the file on any computer with ' +
+    '<code>python3 scripts/release_firmware.py</code>, then choose it here. On its next check-in the board downloads it, checks it, installs it and restarts: about 2 to 4 minutes, most of it the download. The firmware above changes when it is done. ' +
+    'If new firmware cannot get back on Wi-Fi, the board has to be reflashed over USB, so try changes on the bench first.</p>' +
+    '<div class="trj-row" style="margin-top:12px"><input type="file" id="fwFile" accept=".ota"><input id="fwVer" placeholder="version, e.g. 0.2.1" style="max-width:170px">' +
+    '<button class="btn primary" id="fwGo"' + (bl >= 22 ? '' : ' disabled') + '>Upload and install</button></div>' +
+    (BOARD_MSG ? '<div class="heard' + (BOARD_MSG.bad ? ' bad' : '') + '" style="margin-top:12px">' + esc(BOARD_MSG.text) + '</div>' : '');
+  host.innerHTML = h;
+  host.querySelectorAll('[data-led]').forEach(function (b) { b.onclick = function () { issue('led', { color: b.dataset.led }, 'LED ' + b.dataset.led); }; });
+  $('bdReboot').onclick = function () { if (confirm('Restart the tracker? It is offline for about 20 seconds.')) issue('reboot', {}, 'restart the board'); };
+  var f = $('fwFile'), v = $('fwVer'), go = $('fwGo');
+  if (!go) return;
+  f.onchange = function () { var m = /(\d+\.\d+\.\d+)/.exec((f.files[0] || {}).name || ''); if (m && !v.value) v.value = m[1]; };
+  go.onclick = async function () {
+    var file = f.files[0], ver = v.value.trim();
+    if (!file) return boardMsg('Choose an .ota file first.', true);
+    if (!/^\d+\.\d+\.\d+$/.test(ver)) return boardMsg('Give the version as x.y.z, the same as FW in the firmware.', true);
+    var head = new DataView(await file.slice(0, 12).arrayBuffer());
+    if (file.size < 1000 || file.size > 1900000 || head.byteLength < 12 || head.getUint32(8, true) !== OTA_MAGIC || head.getUint32(0, true) !== file.size - 8)
+      return boardMsg('That is not a Giga .ota file. Build it with scripts/release_firmware.py.', true);
+    if (!confirm('Install firmware ' + ver + ' on ' + M.device_id + '? The board restarts to install it.')) return;
+    var tr = cmdTracker(), path = tr.team_id + '/' + ver + '-' + Date.now() + '.ota';
+    boardMsg('Uploading ' + Math.round(file.size / 1024) + ' KB…');
+    var up = await ACCT.sb.storage.from('firmware').upload(path, file, { contentType: 'application/octet-stream' });
+    if (up.error) return boardMsg('Upload failed: ' + up.error.message, true);
+    var ok = await issue('ota', { path: path, version: ver, size: file.size }, 'install firmware ' + ver);
+    boardMsg(ok ? 'Queued. Watch the command queue: accepted when the download starts, done when it installs, then the firmware above changes to ' + ver + '.' : 'The install command was refused; see the queue.', !ok);
+  };
+}
+var BOARD_MSG = null;
+function boardMsg(text, bad) { BOARD_MSG = { text: text, bad: !!bad }; renderBoard(); }
+function renderQueue() {
+  var q = $('queue'); if (!q) return;
+  var all = CTL.local.concat(CTL.queue);
+  q.innerHTML = all.length ? all.map(function (c) {
+    return '<div class="cmd"><span><code>' + esc(c.id) + '</code> &nbsp;' + esc(c.label) +
+      (c.detail ? '<small class="cmd-d">' + esc(c.detail) + '</small>' : '') + '</span><span class="st ' + (CMD_CLS[c.status] || c.status) + '">' + (CMD_WORD[c.status] || c.status) + '</span></div>';
+  }).join('') : '<div class="none">Nothing sent yet. A command waits here until the tracker checks in, about every 5 s.</div>';
+  renderBoard();
 }
 var ICON = {
   path: '<svg viewBox="0 0 24 24"><circle cx="6" cy="18" r="2.2"/><circle cx="18" cy="6" r="2.2"/><path d="M8 18h6.5a3.5 3.5 0 0 0 0-7h-5a3.5 3.5 0 0 1 0-7H16"/></svg>',
@@ -1820,16 +1919,16 @@ function renderControl() {
     '<input type="number" id="gaz" value="' + ctlAz().toFixed(1) + '" min="' + M.az_range[0] + '" max="' + M.az_range[1] + '" step="0.5" aria-label="Target azimuth">' +
     '<input type="number" id="gel" value="' + ctlEl().toFixed(1) + '" min="' + M.el_range[0] + '" max="' + M.el_range[1] + '" step="0.5" aria-label="Target elevation">' +
     '<button class="btn" data-act="goto"' + dis + '>Send</button>' +
-    '<span class="note">Commands are not delivered to the tracker yet: the server does not queue them, so the board never receives these. Motion needs <b>manual</b> mode, as in the firmware. Arrow keys jog.</span></div>';
+    '<span class="note">Commands reach the tracker on its next check-in, about 5 s. No motor driver is wired yet, so the board records the target but nothing moves. Motion needs <b>manual</b> mode, as in the firmware. Arrow keys jog.</span></div>';
   h += '</div><div class="cm-side"><span class="hdg">' + n(CTL.az, 0) + '°</span>' + compass() +
     '<span class="coords">' + Math.abs(M.lat).toFixed(4) + '° ' + (M.lat >= 0 ? 'N' : 'S') + ' · ' + Math.abs(M.lon).toFixed(4) + '° ' + (M.lon >= 0 ? 'E' : 'W') + '</span>' +
     '<button class="clrbtn" data-act="clear_faults"' + (CTL.estop ? '' : ' disabled') + '>Clear faults</button>' +
     '<button class="estop" data-act="estop">Emergency stop</button></div></div>';
   var host = $('ctl'); host.innerHTML = h;
   host.querySelectorAll('[data-mode]').forEach(function (b) { b.onclick = function () {
-    CTL.mode = b.dataset.mode;
-    if (CTL.mode === 'path' && CTL.path) { var pp = trjPoseNow(); CTL.az = pp.az; CTL.el = pp.el; }
-    renderControl(); renderTrajectory(); }; });
+    var m = b.dataset.mode;
+    if (m === 'path') { if (CTL.path) issue('trajectory', CTL.path, 'resume custom path · ' + CTL.path.points.length + ' waypoints'); return; }
+    issue('set_mode', { mode: m }, 'switch to ' + m + ' mode'); }; });
   host.querySelectorAll('[data-step]').forEach(function (b) { b.onclick = function () { CTL.step = parseFloat(b.dataset.step); renderControl(); }; });
   host.querySelectorAll('[data-jog]').forEach(function (b) {
     b.onclick = function () { jog(b.dataset.jog, parseInt(b.dataset.dir, 10)); };
@@ -1849,11 +1948,9 @@ function renderControl() {
     };
   });
   dispatchEvent(new CustomEvent('hw:pose', { detail: { az: ctlAz(), el: ctlEl() } }));
-  $('queue').innerHTML = CTL.queue.length ? CTL.queue.map(function (c) {
-    return '<div class="cmd"><span><code>' + c.id + '</code> &nbsp;' + c.label + '</span><span class="st ' + c.status + '">' + c.status + '</span></div>';
-  }).join('') : '<div class="none">Nothing queued. Commands wait here until the tracker checks in.</div>';
+  renderQueue();
   $('interlocks').innerHTML = [
-    ['Motion in auto mode', 'refused'], ['Command expiry', '30 s TTL'],
+    ['Motion in auto mode', 'refused'], ['Command expiry', CMD_TTL_S + ' s, firmware ' + (CMD_OTA_S / 60) + ' min'],
     ['Azimuth soft limits', M.az_range[0] + '–' + M.az_range[1] + '°'],
     ['Elevation soft limits', M.el_range[0] + '–' + M.el_range[1] + '°'],
     ['Emergency stop', 'latches until cleared'], ['Wind stow', 'overrides manual and custom paths'],
@@ -1862,7 +1959,7 @@ function renderControl() {
 }
 function jog(k, dir) {
   var d = dir * CTL.step;
-  issue('jog', { axis: k, d: d }, AXES[k].name.toLowerCase() + ' ' + (d > 0 ? '+' : '') + d + '°');
+  issue('jog', { axis: k, delta_deg: d }, AXES[k].name.toLowerCase() + ' ' + (d > 0 ? '+' : '') + d + '°');
 }
 document.addEventListener('keydown', function (e) {
   if (current !== 'control' || /INPUT|TEXTAREA|SELECT/.test((e.target || {}).tagName || '')) return;
@@ -2278,7 +2375,7 @@ function renderTrajectory() {
     host.querySelectorAll('[data-tstep]').forEach(function (b) { b.onclick = function () { CTL.step = +b.dataset.tstep; renderControl(); host.querySelectorAll('[data-tstep]').forEach(function (x) { x.setAttribute('aria-pressed', x === b); }); }; });
     $('tSave').onclick = trjTeachSave; $('tSaveMid').onclick = trjTeachSave;
     $('teachT').onchange = function () { TRJ.teachT = this.value; trjSave(); };
-    if ($('tManual')) $('tManual').onclick = function () { CTL.mode = 'manual'; renderControl(); renderTrajectory(); };
+    if ($('tManual')) $('tManual').onclick = function () { issue('set_mode', { mode: 'manual' }, 'switch to manual mode'); };
     if ($('tFresh')) $('tFresh').onclick = function () { TRJ.pts = []; TRJ.intent = 'custom'; TRJ.teachT = '08:00'; trjSave(); renderTrajectory(); };
     if ($('tClear')) $('tClear').onclick = function () { TRJ.pts = []; TRJ.intent = 'custom'; TRJ.teachT = '08:00'; trjSave(); renderTrajectory(); };
     trjTeachRefresh();
@@ -2446,6 +2543,9 @@ function loadSiteData(id, refresh) {
   };
   buildFaultMeta();
   if (!refresh) { CTL.az = LAST.az_pos; CTL.el = LAST.el_pos; CTL.queue = []; }
+  if (LAST.t >= CTL.modeAt) {             /* the tracker's own report of its mode and e-stop */
+    CTL.mode = LAST.mode; CTL.estop = LAST.faults.indexOf('estop_latched') >= 0; CTL.modeAt = LAST.t;
+  }
   computeBaseline();
   setWindow(hours);
   dispatchEvent(new CustomEvent('hw:site', { detail: id }));
