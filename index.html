@@ -641,7 +641,7 @@ input.scrub::-moz-range-thumb{width:14px;height:14px;border-radius:50%;backgroun
 </style>
 
 <div class="gate" id="gate" hidden></div>
-<div class="verbadge" id="verBadge" title="HelioWatch 1.0.0, built Nov 4, 2026 from commit 76d2f29">v1.0.0 · 76d2f29 · Nov 4, 2026</div>
+<div class="verbadge" id="verBadge" title="HelioWatch 1.0.0, built Nov 4, 2026 from commit 0ad27db">v1.0.0 · 0ad27db · Nov 4, 2026</div>
 <div class="app">
 <nav class="rail" id="tabs" aria-label="Sections">
   <div class="mark" title="HelioWatch"><svg width="28" height="28" viewBox="0 0 26 26" aria-hidden="true">
@@ -2720,7 +2720,7 @@ function devPaint() {
       row('Sample #', s.seq != null ? s.seq : '&mdash;') +
       row('Light sensors A0–A3', ['A0', 'A1', 'A2', 'A3'].map(function (k) { return a[k] != null ? a[k] : '–'; }).join(' · ')) +
       row('Other analog A4–A7', ['A4', 'A5', 'A6', 'A7'].map(function (k) { return a[k] != null ? a[k] : '–'; }).join(' · ')) +
-      (d.encoders ? row('Encoder D2/D3', d.encoders.d2_d3 + ' counts') + row('Encoder D4/D5', d.encoders.d4_d5 + ' counts') : '') +
+      (d.motors ? row('Motor driver', esc(d.motors)) : '') +
       row('Azimuth / elevation', s.axes && s.axes.az && s.axes.az.pos_deg != null ? s.axes.az.pos_deg + '° / ' + (s.axes.el ? s.axes.el.pos_deg : '–') + '°' : 'no encoder yet');
     return h + '</div></div>';
   }).join('');
