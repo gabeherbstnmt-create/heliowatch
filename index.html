@@ -641,7 +641,7 @@ input.scrub::-moz-range-thumb{width:14px;height:14px;border-radius:50%;backgroun
 </style>
 
 <div class="gate" id="gate" hidden></div>
-<div class="verbadge" id="verBadge" title="HelioWatch 1.0.0, built Nov 11, 2026 from commit 59ffbaa">v1.0.0 · 59ffbaa · Nov 11, 2026</div>
+<div class="verbadge" id="verBadge" title="HelioWatch 1.0.0, built Nov 11, 2026 from commit f0ce302">v1.0.0 · f0ce302 · Nov 11, 2026</div>
 <div class="app">
 <nav class="rail" id="tabs" aria-label="Sections">
   <div class="mark" title="HelioWatch"><svg width="28" height="28" viewBox="0 0 26 26" aria-hidden="true">
@@ -810,12 +810,12 @@ input.scrub::-moz-range-thumb{width:14px;height:14px;border-radius:50%;backgroun
    shows the real machine. A reading the tracker does not send yet stays null,
    and the console shows it as missing rather than as zero. The sun's position
    is computed from the time and the site, which is astronomy, not a guess.
-   It then polls for new samples every 5 s and tells the console to redraw. */
+   It then polls for new samples every 2 s and tells the console to redraw. */
 (function () {
   'use strict';
   var WINDOW_H = 24;                   /* history loaded at sign-in */
   var PAGE = 1000;                     /* PostgREST's row cap per request */
-  var POLL_MS = 5000;
+  var POLL_MS = 2000;                  /* fast enough for the 3D model to follow a jog */
 
   /* the machine's own limits, from the team's design (not measurements) */
   var MACHINE = {
@@ -1700,8 +1700,8 @@ var SESSION_EVENTS = [];
 var CTL = { mode: 'auto', estop: false, az: 0, el: 0, queue: [] };
 /* with no encoder reported CTL.az/el stay null (readouts show —); drawing and
    the model still need a pose, so they use the home position */
-function ctlAz() { return CTL.az == null ? 90 : CTL.az; }
-function ctlEl() { return CTL.el == null ? 12 : CTL.el; }
+function ctlAz() { return CTL.az == null ? 180 : CTL.az; }   /* stow, until the tracker reports */
+function ctlEl() { return CTL.el == null ? 5 : CTL.el; }
 /* ── commands ────────────────────────────────────────────────────
    A command is a row in public.commands. The ingest function hands it to the
    tracker in the reply to its next telemetry post (about 5 s), and the
@@ -1948,7 +1948,7 @@ function renderControl() {
         var saz = clamp(LAST.sun_az, M.az_range[0], M.az_range[1]), sel = clamp(LAST.sun_el, M.el_range[0], M.el_range[1]);
         issue('goto', { az: saz, el: sel }, 'point at the sun · az ' + saz.toFixed(1) + '° / el ' + sel.toFixed(1) + '°');
       } else if (a === 'estop') issue('estop', {}, 'halt both axes immediately');
-      else issue(a, {}, { home:'return to home position', stow:'drive to stow (flat)', clear_faults:'clear latched faults' }[a]);
+      else issue(a, {}, { home:'go to home (az 180°, el 45°)', stow:'go to stow (az 180°, el 5°)', clear_faults:'clear latched faults' }[a]);
     };
   });
   dispatchEvent(new CustomEvent('hw:pose', { detail: { az: ctlAz(), el: ctlEl() } }));
@@ -2546,7 +2546,11 @@ function loadSiteData(id, refresh) {
     el: { name: 'Elevation', col: 'var(--el)', limit: M.el_limit_a, band: M.deadband.el, range: M.el_range }
   };
   buildFaultMeta();
-  if (!refresh) { CTL.az = LAST.az_pos; CTL.el = LAST.el_pos; CTL.queue = []; }
+  if (!refresh) CTL.queue = [];
+  /* the pose shown in the Control tab, its readouts and its 3D model is where
+     the tracker measures itself to be, whenever it reports that */
+  if (LAST.az_pos != null) CTL.az = LAST.az_pos;
+  if (LAST.el_pos != null) CTL.el = LAST.el_pos;
   if (LAST.t >= CTL.modeAt) {             /* the tracker's own report of its mode and e-stop */
     CTL.mode = LAST.mode; CTL.estop = LAST.faults.indexOf('estop_latched') >= 0; CTL.modeAt = LAST.t;
   }
@@ -2562,6 +2566,13 @@ addEventListener('hw:data', function (e) {
   if (JSON.stringify(HAS) !== before) rebuildCharts();
   renderAll();
   if (current !== 'status' && VIEWS[current] && VIEWS[current][1]) VIEWS[current][1]();
+  /* Control tab: redraw the readouts and move the 3D model to the measured pose,
+     unless the operator is typing a go-to angle, which a redraw would wipe */
+  if (current === 'control') {
+    var a = document.activeElement, typing = a && a.tagName === 'INPUT' && $('ctl') && $('ctl').contains(a);
+    if (typing) dispatchEvent(new CustomEvent('hw:pose', { detail: { az: ctlAz(), el: ctlEl() } }));
+    else renderControl();
+  }
 });
 function axisHealthFor(k) { return health(view, k); }
 
