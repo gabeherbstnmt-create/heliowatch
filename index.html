@@ -641,7 +641,7 @@ input.scrub::-moz-range-thumb{width:14px;height:14px;border-radius:50%;backgroun
 </style>
 
 <div class="gate" id="gate" hidden></div>
-<div class="verbadge" id="verBadge" title="HelioWatch 1.0.0, built Nov 11, 2026 from commit f91c696">v1.0.0 · f91c696 · Nov 11, 2026</div>
+<div class="verbadge" id="verBadge" title="HelioWatch 1.0.0, built Nov 11, 2026 from commit 5d3e191">v1.0.0 · 5d3e191 · Nov 11, 2026</div>
 <div class="app">
 <nav class="rail" id="tabs" aria-label="Sections">
   <div class="mark" title="HelioWatch"><svg width="28" height="28" viewBox="0 0 26 26" aria-hidden="true">
@@ -877,7 +877,8 @@ input.scrub::-moz-range-thumb{width:14px;height:14px;border-radius:50%;backgroun
         cols[ax + '_error_deg'].push(pos !== null && tgt !== null ? Math.round((tgt - pos) * 100) / 100 : null);
         cols[ax + '_current_a'].push(num(a.current_a));
         cols[ax + '_temp_c'].push(num(a.temp_c));
-        cols[ax + '_moving_s'].push(a.moving === true ? cols.dt[cols.dt.length - 1] : a.moving === false ? 0 : null);
+        /* firmware 0.6+ sends the motor-on seconds since its last sample; older builds only a flag */
+        cols[ax + '_moving_s'].push(num(a.moving_s) !== null ? a.moving_s : a.moving === true ? cols.dt[cols.dt.length - 1] : a.moving === false ? 0 : null);
         cols[ax + '_moves'].push(num(k.moves)); cols[ax + '_degrees'].push(num(k.degrees));
         cols[ax + '_stalls'].push(num(k.stalls)); cols[ax + '_overcurrent'].push(num(k.overcurrent));
         cols[ax + '_reversals'].push(num(k.reversals));
@@ -4014,7 +4015,7 @@ function partStatus(k, i){
   /* a part whose readings the tracker does not send yet says so */
   const sent = c => C[c] && C[c].some(v => v != null);
   const NEEDS = {panel:[["panel_w","irradiance_wm2"],"array output and irradiance"], battery:[["supply_v"],"pack voltage"],
-    azMotor:[["az_current_a","az_temp_c"],"azimuth motor current and temperature"], elMotor:[["el_current_a","el_temp_c"],"elevation motor current and temperature"],
+    azMotor:[["az_current_a","az_temp_c","az_pos_deg","az_moves"],"azimuth motor readings"], elMotor:[["el_current_a","el_temp_c","el_pos_deg","el_moves"],"elevation motor readings"],
     yoke:[["az_pos_deg"],"azimuth position"], holder:[["el_pos_deg"],"elevation position"], shaft:[["az_moves"],"azimuth motion counters"],
     base:[["wind_ms"],"wind speed"], ldr:[["irradiance_wm2"],"irradiance"], switch:[["supply_v"],"pack voltage"],
     sensor:[["az_current_a","el_current_a"],"motor current"]};
@@ -4046,7 +4047,22 @@ function partStatus(k, i){
       out.note = "Six AA NiMH cells. Voltage sags as the motors draw current.";
       break; }
     case "azMotor": case "elMotor": {
-      const ax = k==="azMotor" ? "az" : "el", {h,s} = axh(ax), cur = C[ax+"_current_a"][i];
+      const ax = k==="azMotor" ? "az" : "el";
+      if(!sent(ax+"_current_a")){
+        /* no current sensor yet: what the motor's encoder says, which is
+           where the axis is, whether it is moving, and its lifetime counters */
+        const pos = C[ax+"_pos_deg"][i], mv = C[ax+"_moving_s"][i] > 0, st = C[ax+"_stalls"][i];
+        const cnt = v => v==null ? "—" : Math.round(v).toLocaleString();
+        out.tier = st > 0 ? "warn" : "good";
+        out.head = pos==null ? "—" : fx(pos,1)+"°";
+        out.unit = (ax==="az" ? "azimuth" : "elevation")+" now · "+(mv ? "moving" : "holding");
+        out.rows = [["Moves", cnt(C[ax+"_moves"][i])], ["Travel", C[ax+"_degrees"][i]==null ? "—" : fx(C[ax+"_degrees"][i],0)+"°"],
+          ["Direction reversals", cnt(C[ax+"_reversals"][i])], ["Stalls", cnt(st)],
+          ["Soft limits", ax==="az" ? meta.az_range[0]+"–"+meta.az_range[1]+"°" : meta.el_range[0]+"–"+meta.el_range[1]+"°"]];
+        out.note = "Position and motion come from the motor's encoder. A stall is the motor powered with the encoder not turning. Load current and temperature need the current sensor wired.";
+        break;
+      }
+      const {h,s} = axh(ax), cur = C[ax+"_current_a"][i];
       out.tier = scoreTier(h.score);
       out.head = fx(cur,2)+" A"; out.unit = "load current now";
       out.rows = [["Health score", h.score+" / 100"],
@@ -4295,8 +4311,11 @@ function updateCallouts(i){
   const C=P.cols, W=host.clientWidth, H=host.clientHeight, lines=[];
   const val = {
     panel:   [fx(C.panel_w[i],2), "W", C.irradiance_wm2[i]>30 ? fx(C.panel_w[i]/(C.irradiance_wm2[i]*ARRAY_M2)*100,1)+"% eff · "+fx(C.irradiance_wm2[i],0)+" W/m²" : "night"],
-    azMotor: [fx(C.az_current_a[i],2), "A", fx(C.az_temp_c[i],0)+" °C · "+(C.az_moving_s[i]>0?"moving":"holding")],
-    elMotor: [fx(C.el_current_a[i],2), "A", fx(C.el_temp_c[i],0)+" °C · "+(C.el_moving_s[i]>0?"moving":"holding")],
+    /* motors: current and temperature once the sensor is wired; until then the encoder's position */
+    azMotor: C.az_current_a.some(v => v!=null) ? [fx(C.az_current_a[i],2), "A", fx(C.az_temp_c[i],0)+" °C · "+(C.az_moving_s[i]>0?"moving":"holding")]
+                                               : [fx(C.az_pos_deg[i],1), "°", "azimuth · "+(C.az_moving_s[i]>0?"moving":"holding")],
+    elMotor: C.el_current_a.some(v => v!=null) ? [fx(C.el_current_a[i],2), "A", fx(C.el_temp_c[i],0)+" °C · "+(C.el_moving_s[i]>0?"moving":"holding")]
+                                               : [fx(C.el_pos_deg[i],1), "°", "elevation · "+(C.el_moving_s[i]>0?"moving":"holding")],
     battery: [fx(C.supply_v[i],2), "V", C.supply_v[i]<6.6 ? "low" : "pack voltage"],
   };
   for(const c of CO){
