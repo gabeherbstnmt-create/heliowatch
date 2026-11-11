@@ -641,7 +641,7 @@ input.scrub::-moz-range-thumb{width:14px;height:14px;border-radius:50%;backgroun
 </style>
 
 <div class="gate" id="gate" hidden></div>
-<div class="verbadge" id="verBadge" title="HelioWatch 1.0.0, built Nov 11, 2026 from commit f0ce302">v1.0.0 · f0ce302 · Nov 11, 2026</div>
+<div class="verbadge" id="verBadge" title="HelioWatch 1.0.0, built Nov 11, 2026 from commit f91c696">v1.0.0 · f91c696 · Nov 11, 2026</div>
 <div class="app">
 <nav class="rail" id="tabs" aria-label="Sections">
   <div class="mark" title="HelioWatch"><svg width="28" height="28" viewBox="0 0 26 26" aria-hidden="true">
@@ -2733,10 +2733,13 @@ function devPaint() {
       row('Uptime', d.uptime_s != null ? devUptime(d.uptime_s) : '&mdash;') +
       row('Wi-Fi signal', d.rssi_dbm != null ? d.rssi_dbm + ' dBm' : '&mdash;') + row('IP address', esc(d.ip || '—')) +
       row('Sample #', s.seq != null ? s.seq : '&mdash;') +
-      row('Light sensors A0–A3', ['A0', 'A1', 'A2', 'A3'].map(function (k) { return a[k] != null ? a[k] : '–'; }).join(' · ')) +
-      row('Other analog A4–A7', ['A4', 'A5', 'A6', 'A7'].map(function (k) { return a[k] != null ? a[k] : '–'; }).join(' · ')) +
-      (d.motors ? row('Motor driver', esc(d.motors)) : '') +
-      row('Azimuth / elevation', s.axes && s.axes.az && s.axes.az.pos_deg != null ? s.axes.az.pos_deg + '° / ' + (s.axes.el ? s.axes.el.pos_deg : '–') + '°' : 'no encoder yet');
+      /* the sensors read higher when darker; shown by corner as seen from the front of the panel */
+      row('Light sensors (raw, higher = darker)', 'TL ' + (a.A0 != null ? a.A0 : '–') + ' · TR ' + (a.A2 != null ? a.A2 : '–') +
+        ' · BL ' + (a.A3 != null ? a.A3 : '–') + ' · BR ' + (a.A1 != null ? a.A1 : '–')) +
+      ((s.env || {}).light_pct != null ? row('Light level', s.env.light_pct + ' %') : '') +
+      (d.tracking ? row('Light tracking', d.tracking === 'off' ? 'off (press Auto to follow the light)' : esc(d.tracking)) : '') +
+      (s.axes && s.axes.az && s.axes.az.pos_deg != null ? row('Position', 'az ' + s.axes.az.pos_deg.toFixed(1) + '° · el ' + s.axes.el.pos_deg.toFixed(1) + '°' + (d.position ? ' (' + esc(d.position) + ')' : '')) : '') +
+      '';
     return h + '</div></div>';
   }).join('');
 }
