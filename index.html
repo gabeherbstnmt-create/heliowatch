@@ -661,7 +661,7 @@ input.scrub::-moz-range-thumb{width:14px;height:14px;border-radius:50%;backgroun
 </style>
 
 <div class="gate" id="gate" hidden></div>
-<div class="verbadge" id="verBadge" title="HelioWatch 1.0.0, built Nov 13, 2026 from commit cadd1a2">v1.0.0 · cadd1a2 · Nov 13, 2026</div>
+<div class="verbadge" id="verBadge" title="HelioWatch 1.0.0, built Nov 13, 2026 from commit 70be0c1">v1.0.0 · 70be0c1 · Nov 13, 2026</div>
 <div class="app">
 <nav class="rail" id="tabs" aria-label="Sections">
   <div class="mark" title="HelioWatch"><svg width="28" height="28" viewBox="0 0 26 26" aria-hidden="true">
@@ -3201,6 +3201,7 @@ import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 import { RoomEnvironment } from "three/addons/environments/RoomEnvironment.js";
 import { RoundedBoxGeometry } from "three/addons/geometries/RoundedBoxGeometry.js";
+import { toCreasedNormals } from "three/addons/utils/BufferGeometryUtils.js";
 
 /* ============================================================
    DESIGN — everything the report judges comes from this object.
@@ -3700,7 +3701,10 @@ function headerTex(){
 
 function buildElectronics(M_){
   const grp=new THREE.Group(); grp.name="electronics";
-  const Y0=0.020;                                   /* top of the base plate */
+  /* The 200 mm base is filled by the turntable and the motor bridge, so the
+     electronics sit on the bench in front of it, as they do on the real build. */
+  const Y0=0;                                       /* the bench */
+  const AT={controller:[0.140,0.165], breadboard:[-0.010,0.165], battery:[-0.160,0.170], sensor:[-0.130,0.060], switch:[-0.150,0.120]};
   const part=(k, obj)=>{ obj.traverse(o=>{ if(o.isMesh){ o.castShadow=true; o.receiveShadow=true; o.userData.part=k; } }); grp.add(obj); return obj; };
   const box=(w,h,d,mat,x,y,z,r)=>{ const m=new THREE.Mesh(r?new RoundedBoxGeometry(w,h,d,2,r):new THREE.BoxGeometry(w,h,d),mat); m.position.set(x,y,z); return m; };
   const topBox=(w,h,d,side,top,x,y,z)=>{ const m=new THREE.Mesh(new THREE.BoxGeometry(w,h,d),[side,side,top,side,side,side]); m.position.set(x,y,z); return m; };
@@ -3720,11 +3724,11 @@ function buildElectronics(M_){
     for(const [len,x,z] of [[0.046,-0.010,-D/2+0.0016],[0.036,0.032,-D/2+0.0016],[0.046,-0.004,D/2-0.0016],[0.020,0.034,D/2-0.0016]])
       g.add(topBox(len,HH,0.0025,hdrSide,hdr,x,T+HH/2,z));
     g.add(topBox(0.0050,HH,0.040,hdrSide,hdr,W/2-0.004,T+HH/2,0));                  /* double row */
-    g.position.set(0.088,Y0,0.090); part("controller",g); }
+    g.position.set(AT.controller[0],Y0,AT.controller[1]); part("controller",g); }
 
   /* Breadboard — 165 x 55 x 10 mm */
   { const side=M_(0xe9e6de,.0,.8,.6), top=M_(0xffffff,.0,.72,.6); top.map=breadTex();
-    part("breadboard", topBox(0.165,0.010,0.055,side,top,-0.080,Y0+0.005,0.095)); }
+    part("breadboard", topBox(0.165,0.010,0.055,side,top,AT.breadboard[0],Y0+0.005,AT.breadboard[1])); }
 
   /* 6 x AA holder, two layers of three; the top layer shows */
   { const g=new THREE.Group(), L=0.065, Wd=0.050, H=0.032, t=0.0016;
@@ -3741,7 +3745,7 @@ function buildElectronics(M_){
       const sp=new THREE.Mesh(new THREE.TorusGeometry(0.0028,0.0006,6,14),spring); sp.rotation.y=Math.PI/2;
       sp.position.set((i%2?1:-1)*(LEN/2+0.0018),y,z); g.add(sp);
     }
-    g.position.set(0.095,Y0,-0.105); part("battery",g); }
+    g.position.set(AT.battery[0],Y0,AT.battery[1]); part("battery",g); }
 
   /* current sensor breakout — 32 x 21 mm */
   { const g=new THREE.Group(), side=M_(0x1e4d8f,.1,.6,.6), top=M_(0x2a5fae,.1,.5,.7,{cc:.3,ccr:.3});
@@ -3751,13 +3755,13 @@ function buildElectronics(M_){
     g.add(box(0.0075,0.0090,0.0100,term,-0.0115,0.0061,0,0.0006));
     for(const z of [-0.0025,0.0025]){ const sc=new THREE.Mesh(new THREE.CylinderGeometry(0.0013,0.0013,0.0008,14),screw); sc.position.set(-0.0115,0.0110,z); g.add(sc); }
     for(let i=0;i<3;i++) g.add(box(0.0006,0.0060,0.0006,pin,0.0140,0.0046,-0.00254+i*0.00254));
-    g.position.set(-0.070,Y0,-0.090); part("sensor",g); }
+    g.position.set(AT.sensor[0],Y0,AT.sensor[1]); part("sensor",g); }
 
   /* rocker switch */
   { const g=new THREE.Group(), body=M_(0x18191c,.05,.55,.6), rock=M_(0xc23b30,.05,.4,.7,{cc:.5,ccr:.2});
     g.add(box(0.020,0.010,0.013,body,0,0.005,0,0.001));
     const r=box(0.016,0.0035,0.010,rock,0,0.0112,0,0.0012); r.rotation.z=0.16; g.add(r);
-    g.position.set(0.052,Y0,-0.128); part("switch",g); }
+    g.position.set(AT.switch[0],Y0,AT.switch[1]); part("switch",g); }
 
   /* jumper wires — prototype wiring, so they belong to the breadboard */
   { const wires=new THREE.Group();
@@ -3765,15 +3769,17 @@ function buildElectronics(M_){
       const curve=new THREE.CatmullRomCurve3([A, A.clone().add(new THREE.Vector3(0,0.006,0)), mid, B.clone().add(new THREE.Vector3(0,0.006,0)), B]);
       wires.add(new THREE.Mesh(new THREE.TubeGeometry(curve,48,0.0009,8,false), M_(col,.05,.45,.7))); };
     const Yb=Y0+0.0105, Yg=Y0+0.0016+0.0085;
-    run([0.061,Y0+0.02,-0.110],[0.044,Y0+0.008,-0.126],0xd23a2f,0.010);   /* pack + to switch */
-    run([0.060,Y0+0.015,-0.100],[-0.010,Yb,0.072],0x1d1d1f,0.030);         /* pack - to rail */
-    run([0.046,Y0+0.010,-0.124],[-0.004,Yb,0.074],0xd23a2f,0.034);         /* switch to rail */
-    run([-0.020,Yb,0.100],[0.060,Yg,0.066],0xe3b521,0.024);
-    run([-0.030,Yb,0.104],[0.066,Yg,0.066],0x2f9d55,0.028);
-    run([-0.040,Yb,0.108],[0.072,Yg,0.066],0x2f6fd6,0.032);
-    run([-0.012,Yb,0.112],[0.098,Yg,0.115],0xeeeeee,0.020);
-    run([-0.070,Y0+0.004,-0.077],[-0.060,Yb,0.072],0xe3b521,0.030);        /* sensor out */
-    run([-0.067,Y0+0.004,-0.077],[-0.055,Yb,0.072],0x1d1d1f,0.026);
+    /* each end is an offset from its part: [x, height, z] */
+    const on=(k,dx,y,dz)=>[AT[k][0]+dx, y, AT[k][1]+dz];
+    run(on("battery",-0.034,Y0+0.020,-0.005), on("switch",-0.008,Y0+0.008,0.002), 0xd23a2f,0.010);   /* pack + to switch */
+    run(on("battery",-0.035,Y0+0.015, 0.005), on("breadboard",-0.075,Yb,-0.023), 0x1d1d1f,0.030);   /* pack - to rail */
+    run(on("switch",-0.006,Y0+0.010, 0.004),  on("breadboard",-0.070,Yb,-0.021), 0xd23a2f,0.034);   /* switch to rail */
+    run(on("breadboard",0.060,Yb,0.005), on("controller",-0.028,Yg,-0.024), 0xe3b521,0.024);
+    run(on("breadboard",0.050,Yb,0.009), on("controller",-0.022,Yg,-0.024), 0x2f9d55,0.028);
+    run(on("breadboard",0.040,Yb,0.013), on("controller",-0.016,Yg,-0.024), 0x2f6fd6,0.032);
+    run(on("breadboard",0.068,Yb,0.017), on("controller", 0.010,Yg, 0.025), 0xeeeeee,0.020);
+    run(on("sensor",0.000,Y0+0.004,0.013), on("breadboard",-0.060,Yb,-0.023), 0xe3b521,0.030);     /* sensor out */
+    run(on("sensor",0.003,Y0+0.004,0.013), on("breadboard",-0.055,Yb,-0.023), 0x1d1d1f,0.026);
     part("breadboard", wires); }
   return grp;
 }
@@ -3808,29 +3814,34 @@ function buildTrackerCAD(){
      so match on a normalised key rather than the raw CAD name. */
   const key = n => String(n||"").replace(/[^A-Za-z0-9]/g, "");
   const AZK = new Set(K.groups.az.map(key)), ELK = new Set(K.groups.el.map(key));
-  const matFor = n => key(n).startsWith("SolarPanel") ? cell
-                 : key(n)==="Motor1" ? azMat : key(n)==="Motor2" ? elMat
-                 : key(n)==="MainBase1" ? board : key(n)==="LDRShield1" ? dark
-                 : key(n)==="MotorShaft1" ? alu : key(n)==="PanelHolder1" ? frame : yoke;
+  /* "Solar Panel Feet:3" normalises to SolarPanelFeet3, so match the modules exactly */
+  const isCell = n => /^SolarPanel\d+$/.test(key(n));
+  const MAT = {Motor1:azMat, Motor2:elMat, BaseWithHoles1:board, LDRShield1:dark, Shaft1:alu,
+               VerticalPanelHolder21:frame, Connector1:frame, N20Motormount1:dark};
+  const matFor = n => isCell(n) ? cell : MAT[key(n)] || (key(n).startsWith("SolarPanelFeet") ? dark : yoke);
 
   const root=new THREE.Group();
   const az=new THREE.Group(); az.position.fromArray(K.azPivot); root.add(az);
   const el=new THREE.Group(); el.position.fromArray(K.elPivot); az.add(el);
   const panel=new THREE.Group(); el.add(panel);
-  const into = n => ELK.has(key(n)) ? (key(n).startsWith("SolarPanel") ? panel : el)
+  const into = n => ELK.has(key(n)) ? (isCell(n) ? panel : el)
                   : AZK.has(key(n)) ? az : root;
 
   let placed=0;
   src.traverse(o=>{
     if(!o.isMesh) return;
     const nm = o.name || (o.parent && o.parent.name) || "";
-    if(key(nm).startsWith("SolarPanel")) planarUV(o.geometry, "auto", true);
-    if(key(nm)==="MainBase1") planarUV(o.geometry, "xz", false);
+    /* The GLB carries no normals, and without them the lit materials render
+       black. Crease at 35°: flat faces stay crisp, round parts stay round. */
+    if(!o.geometry.attributes.normal) o.geometry = toCreasedNormals(o.geometry, Math.PI*35/180);
+    if(isCell(nm)) planarUV(o.geometry, "auto", true);
+    if(key(nm)==="BaseWithHoles1") planarUV(o.geometry, "xz", false);
     const m=new THREE.Mesh(o.geometry, matFor(nm));
     m.castShadow=true; m.receiveShadow=true; m.name=nm; m.userData.part=partKeyFor(nm);
     into(nm).add(m); placed++;
   });
-  if(placed!==11) console.warn("expected 11 CAD parts, placed", placed);
+  const want = K.groups.fixed.length + K.groups.az.length + K.groups.el.length;
+  if(placed!==want) console.warn("expected "+want+" CAD parts, placed", placed);
 
   /* The ordered electronics. No CAD exists for these, so they are modelled
      here from catalogue dimensions: board outlines, headers, cells and wires
@@ -4105,8 +4116,8 @@ const PART_DEF = [
   {k:"elMotor",    name:"Elevation motor",      sub:"N20 gearmotor with encoder",     grp:"Drive"},
   {k:"yoke",       name:"Azimuth yoke",         sub:"Turns the array about vertical", grp:"Structure"},
   {k:"holder",     name:"Panel holder",         sub:"Carries the array and tilts it", grp:"Structure"},
-  {k:"shaft",      name:"Main shaft",           sub:"Vertical pivot",                 grp:"Structure"},
-  {k:"base",       name:"Base plate",           sub:"Anchors the tracker",            grp:"Structure"},
+  {k:"shaft",      name:"Turntable",            sub:"Turns on the base, carries the yoke", grp:"Structure"},
+  {k:"base",       name:"Base and motor bridge",sub:"Anchors the tracker, holds the azimuth motor", grp:"Structure"},
   {k:"ldr",        name:"Light sensor shield",  sub:"LDR sun sensing",                grp:"Sensing"},
   {k:"sensor",     name:"Current sensor module",sub:"Reads both motor currents",      grp:"Sensing"},
   {k:"controller", name:"Arduino Giga R1 WiFi", sub:"Controller and Wi-Fi",           grp:"Electronics"},
@@ -4123,13 +4134,13 @@ const SPARK = {panel:"panel_w", azMotor:"az_current_a", elMotor:"el_current_a", 
 const NK = s => String(s||"").replace(/[^A-Za-z0-9]/g, "");
 function partKeyFor(nm){
   const k = NK(nm);
-  if(k.startsWith("SolarPanel")) return "panel";
-  if(k==="Motor1") return "azMotor";
+  if(/^SolarPanel\d+$/.test(k)) return "panel";
+  if(k==="Motor1" || k==="N20Motormount1") return "azMotor";
   if(k==="Motor2") return "elMotor";
   if(k.startsWith("Configuration")) return "yoke";
-  if(k==="PanelHolder1") return "holder";
-  if(k==="MotorShaft1") return "shaft";
-  if(k==="MainBase1") return "base";
+  if(k.startsWith("VerticalPanelHolder") || k.startsWith("SolarPanelFeet")) return "holder";
+  if(k==="Shaft1") return "shaft";
+  if(k==="BaseWithHoles1" || k==="Connector1") return "base";
   if(k==="LDRShield1") return "ldr";
   if(k.startsWith("ArduinoGiga")) return "controller";
   if(k==="Breadboard") return "breadboard";
@@ -4223,7 +4234,7 @@ function partStatus(k, i){
       out.tier = scoreTier(h.f.slew);
       out.head = String(s.reversals); out.unit = "direction reversals";
       out.rows = [["Azimuth travel", fx(s.degrees,0)+"°"], ["Moves", s.moves], ["Slew time", fx(h.stats.secPerMove,1)+" s/move"]];
-      out.note = "Wear is inferred from travel and reversals. There is no sensor on the shaft.";
+      out.note = "Wear is inferred from travel and reversals. There is no sensor on the turntable.";
       break; }
     case "base": {
       const W = C.wind_ms[i]; let mx = 0; for(let j=0;j<C.wind_ms.length;j++) if(C.wind_ms[j]>mx) mx = C.wind_ms[j];
