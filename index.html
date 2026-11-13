@@ -396,6 +396,26 @@ input[type=number]:focus{outline:none;border-color:var(--accent)}
 .dpad .mid:disabled{opacity:.4;cursor:not-allowed}
 .dpad .dl{position:absolute;left:0;right:0;text-align:center;font-size:9.5px;letter-spacing:.06em;color:var(--muted);pointer-events:none}
 .dpad .dl.t{top:50px}.dpad .dl.b{bottom:50px}
+/* joystick: drag the knob; the further from centre, the faster */
+.padwrap{display:flex;flex-direction:column;align-items:center;gap:10px}
+.padmode button{padding:5px 12px;font-size:12px}
+.joy{position:relative;width:184px;height:184px;border-radius:50%;flex:none;touch-action:none;user-select:none;-webkit-user-select:none;cursor:grab;
+  background:radial-gradient(circle at 50% 35%,var(--raised),var(--sunken) 70%);border:1px solid var(--line-2);
+  box-shadow:inset 0 2px 0 rgba(255,255,255,.05),0 10px 30px rgba(0,0,0,.35)}
+.joy::before,.joy::after{content:"";position:absolute;background:var(--line-2);pointer-events:none}
+.joy::before{left:50%;top:22px;bottom:22px;width:1px}
+.joy::after{top:50%;left:22px;right:22px;height:1px}
+.joy-knob{position:absolute;left:50%;top:50%;width:68px;height:68px;margin:-34px 0 0 -34px;border-radius:50%;z-index:1;
+  background:radial-gradient(circle at 40% 32%,var(--raised),var(--card) 75%);border:1px solid var(--line-2);
+  box-shadow:0 8px 20px rgba(0,0,0,.45),inset 0 0 0 5px var(--sunken);transition:transform .2s cubic-bezier(.2,.8,.2,1)}
+.joy.drag{cursor:grabbing}
+.joy.drag .joy-knob{transition:none;border-color:var(--accent);box-shadow:0 0 0 4px var(--accent-soft),0 8px 20px rgba(0,0,0,.45),inset 0 0 0 5px var(--sunken)}
+.joy.off{opacity:.45;cursor:not-allowed}
+.joy .jl{position:absolute;font-size:9px;letter-spacing:.06em;color:var(--muted);pointer-events:none}
+.joy .jl.t{top:8px;left:0;right:0;text-align:center}.joy .jl.b{bottom:8px;left:0;right:0;text-align:center}
+.joy .jl.l{left:6px;top:50%;transform:translateY(-50%)}.joy .jl.r{right:6px;top:50%;transform:translateY(-50%)}
+.joy-status{font-size:12px;line-height:1.45;color:var(--ink-2);min-height:34px;text-align:center;max-width:230px}
+.joy-status b{color:var(--ink);font-weight:500}
 .cm-foot{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-top:18px;padding-top:16px;border-top:1px solid var(--line)}
 .cm-foot .lb{font-size:10px;letter-spacing:.09em;text-transform:uppercase;color:var(--muted);margin-right:4px}
 .cm-foot .note{margin-left:auto;font-size:12px;color:var(--muted);max-width:430px;line-height:1.45}
@@ -641,7 +661,7 @@ input.scrub::-moz-range-thumb{width:14px;height:14px;border-radius:50%;backgroun
 </style>
 
 <div class="gate" id="gate" hidden></div>
-<div class="verbadge" id="verBadge" title="HelioWatch 1.0.0, built Nov 11, 2026 from commit 5d3e191">v1.0.0 · 5d3e191 · Nov 11, 2026</div>
+<div class="verbadge" id="verBadge" title="HelioWatch 1.0.0, built Nov 13, 2026 from commit cadd1a2">v1.0.0 · cadd1a2 · Nov 13, 2026</div>
 <div class="app">
 <nav class="rail" id="tabs" aria-label="Sections">
   <div class="mark" title="HelioWatch"><svg width="28" height="28" viewBox="0 0 26 26" aria-hidden="true">
@@ -937,6 +957,10 @@ input.scrub::-moz-range-thumb{width:14px;height:14px;border-radius:50%;backgroun
   window.hwLiveFollow = function () {
     var st = window.HW_LIVE; if (!st || st.timer) return;
     st.timer = setInterval(async function () {
+      /* every POLL_MS, or every half second while the joystick is steering */
+      var fast = (window.hwLiveFast || 0) > Date.now();
+      if (st.busy || (!fast && Date.now() - (st.lastPoll || 0) < POLL_MS)) return;
+      st.busy = true; st.lastPoll = Date.now();
       try {
         var fresh = await fetchSince(st.sb, st.tr, null, st.rows[st.rows.length - 1].id);
         if (!fresh.length) return;
@@ -946,7 +970,8 @@ input.scrub::-moz-range-thumb{width:14px;height:14px;border-radius:50%;backgroun
         window.HW_SITES[st.tr.device_id] = pack(st.tr, st.rows);
         dispatchEvent(new CustomEvent('hw:data', { detail: st.tr.device_id }));
       } catch (e) { /* a missed poll is retried on the next tick */ }
-    }, POLL_MS);
+      finally { st.busy = false; }
+    }, 500);
   };
 })();
 /* ══ HelioWatch — published site bootstrap ═══════════════════════════
@@ -1754,7 +1779,7 @@ function cmdPoll() {
   var tr = cmdTracker(); if (!tr || cmdBusy) return Promise.resolve();
   cmdBusy = true; cmdLast = Date.now();
   return ACCT.sb.from('commands').select('id, type, params, label, status, detail, created_at, finished_at')
-    .eq('tracker_id', tr.id).order('created_at', { ascending: false }).limit(40).then(function (r) {
+    .eq('tracker_id', tr.id).neq('type', 'drive').order('created_at', { ascending: false }).limit(40).then(function (r) {
     cmdBusy = false;
     if (r.error) return;
     var rows = r.data || [], before = CTL.mode + CTL.estop;
@@ -1890,6 +1915,7 @@ function compass() {
   return h + '<circle cx="100" cy="100" r="3" fill="var(--card)" stroke="var(--ink)"/></svg>';
 }
 function renderControl() {
+  if (JOY.on) { JOY.redraw = true; dispatchEvent(new CustomEvent('hw:pose', { detail: { az: ctlAz(), el: ctlEl() } })); joyPaint(); return; }
   var manual = CTL.mode === 'manual' && !CTL.estop, dis = manual ? '' : ' disabled';
   var azL = LAST.az_cur / (AXES.az.limit || 1), elL = LAST.el_cur / (AXES.el.limit || 1), sunUp = LAST.sun_el > 0;
   var h = '<div class="cm"><div class="cm-main">';
@@ -1912,7 +1938,13 @@ function renderControl() {
       return '<button data-step="' + v + '" aria-pressed="' + (CTL.step === v) + '">' + v + '°</button>'; }).join('') + '</div></div></div>';
   h += '<div class="rbtns"><button class="rnd" data-act="home"' + dis + ' title="Return to home">HOME</button>' +
        '<button class="rnd" data-act="stow"' + (CTL.estop ? ' disabled' : '') + ' title="Drive flat to stow">STOW</button></div>';
-  h += '<div class="dpad" role="group" aria-label="Jog">' +
+  h += '<div class="padwrap"><div class="mtabs padmode" role="group" aria-label="Manual control style">' +
+    [['pad', 'Buttons'], ['stick', 'Joystick']].map(function (o) {
+      return '<button data-input="' + o[0] + '" aria-pressed="' + (CTL.input === o[0]) + '">' + o[1] + '</button>'; }).join('') + '</div>';
+  if (CTL.input === 'stick') h += '<div class="joy' + (joyOk() ? '' : ' off') + '" id="joy" role="application" tabindex="0" aria-label="Joystick: drag to turn and tilt; release to stop">' +
+    '<span class="jl t">TILT ▲</span><span class="jl b">TILT ▼</span><span class="jl l">◀</span><span class="jl r">▶</span><div class="joy-knob"></div></div>' +
+    '<div class="joy-status" id="joyStatus"></div>';
+  else h += '<div class="dpad" role="group" aria-label="Jog">' +
     '<button class="dp up" data-jog="el" data-dir="1" aria-label="Tilt up"' + dis + '>' + ICON.up + '</button>' +
     '<button class="dp dn" data-jog="el" data-dir="-1" aria-label="Tilt down"' + dis + '>' + ICON.dn + '</button>' +
     '<button class="dp lf" data-jog="az" data-dir="-1" aria-label="Turn left"' + dis + '>' + ICON.lf + '</button>' +
@@ -1920,11 +1952,12 @@ function renderControl() {
     '<span class="dl t">TILT</span><span class="dl b">STEP ' + CTL.step + '°</span>' +
     '<button class="mid" data-act="sun"' + (manual && sunUp ? '' : ' disabled') + ' title="Point straight at the sun">SUN</button></div>';
   h += '</div>';
+  h += '</div>';
   h += '<div class="cm-foot"><span class="lb">Go to</span>' +
     '<input type="number" id="gaz" value="' + ctlAz().toFixed(1) + '" min="' + M.az_range[0] + '" max="' + M.az_range[1] + '" step="0.5" aria-label="Target azimuth">' +
     '<input type="number" id="gel" value="' + ctlEl().toFixed(1) + '" min="' + M.el_range[0] + '" max="' + M.el_range[1] + '" step="0.5" aria-label="Target elevation">' +
     '<button class="btn" data-act="goto"' + dis + '>Send</button>' +
-    '<span class="note">Commands reach the tracker on its next check-in, about 5 s. No motor driver is wired yet, so the board records the target but nothing moves. Motion needs <b>manual</b> mode, as in the firmware. Arrow keys jog.</span></div>';
+    '<span class="note">Commands reach the tracker within about a second in Manual mode. Motion needs <b>manual</b> mode, as in the firmware. Arrow keys jog, or steer when the joystick is showing.</span></div>';
   h += '</div><div class="cm-side"><span class="hdg">' + n(CTL.az, 0) + '°</span>' + compass() +
     '<span class="coords">' + Math.abs(M.lat).toFixed(4) + '° ' + (M.lat >= 0 ? 'N' : 'S') + ' · ' + Math.abs(M.lon).toFixed(4) + '° ' + (M.lon >= 0 ? 'E' : 'W') + '</span>' +
     '<button class="clrbtn" data-act="clear_faults"' + (CTL.estop ? '' : ' disabled') + '>Clear faults</button>' +
@@ -1935,6 +1968,9 @@ function renderControl() {
     if (m === 'path') { if (CTL.path) issue('trajectory', CTL.path, 'resume custom path · ' + CTL.path.points.length + ' waypoints'); return; }
     issue('set_mode', { mode: m }, 'switch to ' + m + ' mode'); }; });
   host.querySelectorAll('[data-step]').forEach(function (b) { b.onclick = function () { CTL.step = parseFloat(b.dataset.step); renderControl(); }; });
+  host.querySelectorAll('[data-input]').forEach(function (b) { b.onclick = function () {
+    CTL.input = b.dataset.input; try { localStorage.setItem('hw-ctl-input', CTL.input); } catch (e) {} renderControl(); }; });
+  if ($('joy')) joyBind($('joy'));
   host.querySelectorAll('[data-jog]').forEach(function (b) {
     b.onclick = function () { jog(b.dataset.jog, parseInt(b.dataset.dir, 10)); };
   });
@@ -1962,6 +1998,105 @@ function renderControl() {
     ['Custom path', 'every waypoint checked against soft limits; any failure rejects the whole path']
   ].map(function (r) { return '<div class="row"><span class="k">' + r[0] + '</span><span class="v">' + r[1] + '</span></div>'; }).join('');
 }
+/* ── joystick ────────────────────────────────────────────────────────
+   Dragging sends 'drive' commands: a speed per axis (-1..1) the board holds
+   for JOY_MS unless renewed. While the knob is held the site renews it every
+   JOY_EVERY ms (sooner when the push changes), and on release it sends zero,
+   twice. The board stops on its own when renewals stop (connection lost, tab
+   closed), at the soft limits, and on a stall. Drive commands expire after
+   3 s, so a late one is never acted on, and they are kept out of the
+   command list, which would otherwise fill with them. */
+var JOY = { on: false, vx: 0, vy: 0, sent: null, lastSend: 0, inflight: false, pending: false, timer: null, err: '', redraw: false, keys: {}, drove: false };
+var JOY_MS = 1200, JOY_EVERY = 400, JOY_DPS = { az: 20, el: 15 };   /* full-stick speeds, as in the firmware */
+CTL.input = (function () { try { return localStorage.getItem('hw-ctl-input') === 'stick' ? 'stick' : 'pad'; } catch (e) { return 'pad'; } })();
+function joyOk() { return !!cmdTracker() && canCommand() && CTL.mode === 'manual' && !CTL.estop; }
+function joySend(force) {
+  var tr = cmdTracker(); if (!tr || !canCommand()) return;
+  var v = { az: +JOY.vx.toFixed(2), el: +JOY.vy.toFixed(2) }, zero = !v.az && !v.el;
+  var same = JOY.sent && Math.abs(JOY.sent.az - v.az) < 0.06 && Math.abs(JOY.sent.el - v.el) < 0.06;
+  if (!force && zero && !JOY.drove) return;                          /* nothing moving yet: nothing to stop */
+  if (!force && Date.now() - JOY.lastSend < 150) return;            /* at most ~6 a second; the 150 ms tick sends the latest */
+  if (!force && same && (zero || Date.now() - JOY.lastSend < JOY_EVERY)) return;
+  if (!zero) JOY.drove = true;
+  if (JOY.inflight) { JOY.pending = true; return; }
+  JOY.inflight = true; JOY.sent = v; JOY.lastSend = Date.now();
+  window.hwLiveFast = Date.now() + 6000;              /* web/live.js polls faster while steering */
+  ACCT.sb.from('commands').insert({ team_id: tr.team_id, tracker_id: tr.id, type: 'drive', params: { az: v.az, el: v.el, ms: JOY_MS },
+    label: zero ? 'joystick released' : 'joystick', expires_at: new Date(Date.now() + 3000).toISOString() }).then(function (r) {
+    JOY.inflight = false; JOY.err = r.error ? r.error.message : ''; joyPaint();
+    if (JOY.pending) { JOY.pending = false; joySend(true); }
+  }, function () { JOY.inflight = false; JOY.err = 'could not reach the server'; joyPaint(); });
+}
+function joyStart() {
+  JOY.on = true; JOY.err = '';
+  clearInterval(JOY.timer);
+  JOY.timer = setInterval(function () { joySend(false); }, 150);
+}
+function joyStop() {
+  if (!JOY.on) return;
+  JOY.on = false; JOY.vx = JOY.vy = 0; JOY.keys = {};
+  clearInterval(JOY.timer); JOY.timer = null;
+  if (JOY.drove) {
+    JOY.drove = false;
+    joySend(true);
+    setTimeout(function () { if (!JOY.on) joySend(true); }, 700);   /* a second stop, in case the first is delayed */
+  }
+  var k = $('joy') && $('joy').querySelector('.joy-knob'); if (k) k.style.transform = '';
+  if ($('joy')) $('joy').classList.remove('drag');
+  joyPaint();
+  if (JOY.redraw) { JOY.redraw = false; renderControl(); }
+}
+/* knob offset (px, y down) -> speeds, with a dead zone and a gentle curve for fine moves */
+function joySet(dx, dy, R) {
+  var d = Math.hypot(dx, dy), r = Math.min(1, d / R);
+  var m = r < 0.12 ? 0 : Math.pow((r - 0.12) / 0.88, 1.5);
+  var x = d ? m * dx / d : 0, y = d ? -m * dy / d : 0;
+  JOY.vx = Math.abs(x) < 0.08 ? 0 : x; JOY.vy = Math.abs(y) < 0.08 ? 0 : y;
+  var k = $('joy') && $('joy').querySelector('.joy-knob');
+  if (k) { var c = d > R ? R / d : 1; k.style.transform = 'translate(' + (dx * c).toFixed(1) + 'px,' + (dy * c).toFixed(1) + 'px)'; }
+  joySend(false); joyPaint();
+}
+function joyBind(el) {
+  var R = el.clientWidth / 2 - 40, id = null;
+  var at = function (e) { var b = el.getBoundingClientRect(); joySet(e.clientX - b.left - b.width / 2, e.clientY - b.top - b.height / 2, R); };
+  el.addEventListener('pointerdown', function (e) {
+    if (!joyOk()) { joyPaint(); return; }
+    id = e.pointerId; el.setPointerCapture(id); el.classList.add('drag'); joyStart(); at(e); e.preventDefault();
+  });
+  el.addEventListener('pointermove', function (e) { if (JOY.on && e.pointerId === id) at(e); });
+  var up = function (e) { if (e.pointerId === id) { id = null; joyStop(); } };
+  el.addEventListener('pointerup', up); el.addEventListener('pointercancel', up); el.addEventListener('lostpointercapture', up);
+  joyPaint();
+}
+/* the line under the stick: what it is doing, or why it cannot */
+function joyPaint() {
+  var st = $('joyStatus'); if (!st) return;
+  var pct = function (v) { return Math.round(Math.abs(v) * 100) + '%'; };
+  var parts = [];
+  if (JOY.vx) parts.push('Turning <b>' + (JOY.vx > 0 ? 'right' : 'left') + '</b> ' + pct(JOY.vx) + ' · ' + (Math.abs(JOY.vx) * JOY_DPS.az).toFixed(0) + '°/s');
+  if (JOY.vy) parts.push('Tilting <b>' + (JOY.vy > 0 ? 'up' : 'down') + '</b> ' + pct(JOY.vy) + ' · ' + (Math.abs(JOY.vy) * JOY_DPS.el).toFixed(0) + '°/s');
+  st.innerHTML = JOY.err ? '<span style="color:var(--crit-ink)">' + esc(JOY.err) + '</span>'
+    : JOY.on ? (parts.length ? parts.join('<br>') : 'Centred · holding still') + '<br><span style="color:var(--muted)">az ' + n(CTL.az, 1) + '° · el ' + n(CTL.el, 1) + '° · release to stop</span>'
+    : !cmdTracker() ? 'Sign in and connect the tracker to steer it.'
+    : !canCommand() ? 'Your role can watch but not steer.'
+    : CTL.estop ? 'Emergency stop latched. Clear faults first.'
+    : CTL.mode !== 'manual' ? 'Switch to <b>Manual</b> to steer with the joystick.'
+    : 'Drag to steer, further for faster (up to ' + JOY_DPS.az + '°/s turn, ' + JOY_DPS.el + '°/s tilt). Let go to stop.';
+}
+/* arrow keys steer at half speed while the joystick is showing; releasing them stops */
+function joyKeys() {
+  var k = JOY.keys, x = (k.ArrowRight ? 0.5 : 0) - (k.ArrowLeft ? 0.5 : 0), y = (k.ArrowUp ? 0.5 : 0) - (k.ArrowDown ? 0.5 : 0);
+  if (!x && !y) { joyStop(); return; }
+  if (!JOY.on) joyStart();
+  JOY.vx = x; JOY.vy = y; joySend(true); joyPaint();
+}
+document.addEventListener('keyup', function (e) {
+  if (!JOY.keys[e.key]) return;
+  delete JOY.keys[e.key]; joyKeys();
+});
+addEventListener('blur', function () { if (JOY.on) joyStop(); });                        /* window loses focus: stop */
+document.addEventListener('visibilitychange', function () { if (document.hidden && JOY.on) joyStop(); });
+
 function jog(k, dir) {
   var d = dir * CTL.step;
   issue('jog', { axis: k, delta_deg: d }, AXES[k].name.toLowerCase() + ' ' + (d > 0 ? '+' : '') + d + '°');
@@ -1971,6 +2106,7 @@ document.addEventListener('keydown', function (e) {
   var m = { ArrowUp: ['el', 1], ArrowDown: ['el', -1], ArrowLeft: ['az', -1], ArrowRight: ['az', 1] }[e.key];
   if (!m) return;
   e.preventDefault();
+  if (CTL.input === 'stick') { if (!e.repeat && joyOk()) { JOY.keys[e.key] = true; joyKeys(); } return; }
   if (CTL.mode === 'manual' && !CTL.estop) jog(m[0], m[1]);
 });
 
@@ -2570,8 +2706,8 @@ addEventListener('hw:data', function (e) {
   /* Control tab: redraw the readouts and move the 3D model to the measured pose,
      unless the operator is typing a go-to angle, which a redraw would wipe */
   if (current === 'control') {
-    var a = document.activeElement, typing = a && a.tagName === 'INPUT' && $('ctl') && $('ctl').contains(a);
-    if (typing) dispatchEvent(new CustomEvent('hw:pose', { detail: { az: ctlAz(), el: ctlEl() } }));
+    var a = document.activeElement, typing = JOY.on || (a && a.tagName === 'INPUT' && $('ctl') && $('ctl').contains(a));
+    if (typing) { dispatchEvent(new CustomEvent('hw:pose', { detail: { az: ctlAz(), el: ctlEl() } })); joyPaint(); }
     else renderControl();
   }
 });
