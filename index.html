@@ -1032,8 +1032,13 @@ input.scrub::-moz-range-thumb{width:14px;height:14px;border-radius:50%;backgroun
     var live = await window.hwLiveSites(sb);
     if (live.error) { mode = 'nodata'; err = live.error; paint(); return; }
     if (!window.HW_CAD) {
-      var st = sb.storage.from('console');
-      var got = await Promise.all(['kinematics.json', 'tracker.glb'].map(function (n) { return st.download(n); }));
+      /* fetched directly, not with storage.download(), so the browser checks for a
+         newer upload each time instead of reusing its cached copy for an hour */
+      var tok = (await sb.auth.getSession()).data.session.access_token;
+      var got = await Promise.all(['kinematics.json', 'tracker.glb'].map(function (n) {
+        return fetch(cfg.url + '/storage/v1/object/authenticated/console/' + n, { cache: 'no-cache', headers: { Authorization: 'Bearer ' + tok, apikey: cfg.anonKey } })
+          .then(function (r) { return r.ok ? { data: r } : { error: r.status }; }, function (e) { return { error: e }; });
+      }));
       if (got.find(function (g) { return g.error; })) {
         mode = 'in'; err = 'The 3D model has not been uploaded yet. An owner can upload it from the Team page of the local console.'; paint(); return;
       }
@@ -3031,7 +3036,7 @@ function bindTeam(host) {
       var files = [['kinematics.json', new Blob([JSON.stringify(window.HW_KIN)], { type: 'application/json' })],
                    ['tracker.glb', new Blob([glb], { type: 'model/gltf-binary' })]];
       for (var k = 0; k < files.length; k++) {
-        var r = await sb.storage.from('console').upload(files[k][0], files[k][1], { upsert: true, contentType: files[k][1].type });
+        var r = await sb.storage.from('console').upload(files[k][0], files[k][1], { upsert: true, cacheControl: '60', contentType: files[k][1].type });
         if (r.error) return r;
       }
       return {};
@@ -3376,7 +3381,7 @@ function analyse(){
       longestEl=Math.max(longestEl, Math.abs(C.el_pos_deg[i]-C.el_pos_deg[i-1]));
       for(const ax of ["az","el"]){
         const ds=(C[ax+"_stalls"][i]||0)-(C[ax+"_stalls"][i-1]||0), dov=(C[ax+"_overcurrent"][i]||0)-(C[ax+"_overcurrent"][i-1]||0);
-        if(ds>0) ev.push({t, kind:"stall", sev:"crit", title:`${ax==="az"?"Azimuth":"Elevation"} motor stall`, detail:`Load ${C[ax+"_current_a"][i].toFixed(2)} A against a ${D[ax+"_rated_a"]} A rating`});
+        if(ds>0) ev.push({t, kind:"stall", sev:"crit", title:`${ax==="az"?"Azimuth":"Elevation"} motor stall`, detail:C[ax+"_current_a"][i]==null ? "The motor was powered but its encoder stopped turning" : `Load ${C[ax+"_current_a"][i].toFixed(2)} A against a ${D[ax+"_rated_a"]} A rating`});
         if(dov>0) ev.push({t, kind:"oc", sev:"crit", title:`${ax==="az"?"Azimuth":"Elevation"} over-current trip`, detail:"Driver reported an over-current trip"});
       }
     }
@@ -3388,8 +3393,8 @@ function analyse(){
     const key = i<N ? (m==="stow"?"stow": f && f.includes("over_temp") ? "temp" : null) : null;
     if(run && key!==run.key){
       const mins=Math.round((T[i-1]-run.t)/60)+Math.round(INT/60);
-      if(run.key==="stow") ev.push({t:run.t, kind:"stow", sev:"warn", title:`Wind stow · ${mins} min`, detail:`Gusts to ${run.w.toFixed(1)} m/s`});
-      else ev.push({t:run.t, kind:"temp", sev:"crit", title:`Azimuth driver thermal trip · ${mins} min`, detail:`Peaked at ${run.temp.toFixed(0)} °C`});
+      if(run.key==="stow") ev.push({t:run.t, kind:"stow", sev:"warn", title:`Wind stow · ${mins} min`, detail:run.w==null ? "Stowed" : `Gusts to ${run.w.toFixed(1)} m/s`});
+      else ev.push({t:run.t, kind:"temp", sev:"crit", title:`Azimuth driver thermal trip · ${mins} min`, detail:run.temp==null ? "Driver over-temperature" : `Peaked at ${run.temp.toFixed(0)} °C`});
       run=null;
     }
     if(key && !run) run={key, t:T[i], w:0, temp:0};
