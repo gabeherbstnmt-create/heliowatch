@@ -661,7 +661,7 @@ input.scrub::-moz-range-thumb{width:14px;height:14px;border-radius:50%;backgroun
 </style>
 
 <div class="gate" id="gate" hidden></div>
-<div class="verbadge" id="verBadge" title="HelioWatch 1.0.0, built Nov 13, 2026 from commit 70be0c1">v1.0.0 · 70be0c1 · Nov 13, 2026</div>
+<div class="verbadge" id="verBadge" title="HelioWatch 1.0.0, built Nov 16, 2026 from commit 6896448">v1.0.0 · 6896448 · Nov 16, 2026</div>
 <div class="app">
 <nav class="rail" id="tabs" aria-label="Sections">
   <div class="mark" title="HelioWatch"><svg width="28" height="28" viewBox="0 0 26 26" aria-hidden="true">
@@ -839,7 +839,7 @@ input.scrub::-moz-range-thumb{width:14px;height:14px;border-radius:50%;backgroun
 
   /* the machine's own limits, from the team's design (not measurements) */
   var MACHINE = {
-    az_limit_a: 2.60, el_limit_a: 2.10, az_range: [60, 300], el_range: [5, 88],
+    az_limit_a: 2.60, el_limit_a: 2.10, az_range: [60, 300], el_range: [0, 90],
     deadband: { az: 1.6, el: 1.4 }, temp_trip_c: 80, temp_clear_c: 65, wind_stow_ms: 12.0
   };
   var MODES = ['idle', 'homing', 'auto', 'manual', 'path', 'stow', 'fault'];
@@ -3219,7 +3219,7 @@ const REFERENCE = {
      are entered as the equivalent single aperture of the 2x2 array. */
   panel_w_m: 0.220, panel_h_m: 0.120, eff_pct: 20,
   pivot_h_m: 0.220, axle_offset_m: 0.020,
-  az_min: 60, az_max: 300, el_min: 5, el_max: 88,
+  az_min: 60, az_max: 300, el_min: 0, el_max: 90,
   az_rate_dps: 6, el_rate_dps: 6,
   /* N20 gearmotor on a 6x1.2 V NiMH pack. CONFIRM against the datasheet —
      this is a typical 50 rpm N20 stall figure, not a measured one. */
