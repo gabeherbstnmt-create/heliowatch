@@ -661,7 +661,7 @@ input.scrub::-moz-range-thumb{width:14px;height:14px;border-radius:50%;backgroun
 </style>
 
 <div class="gate" id="gate" hidden></div>
-<div class="verbadge" id="verBadge" title="HelioWatch 1.0.0, built Nov 16, 2026 from commit 6896448">v1.0.0 · 6896448 · Nov 16, 2026</div>
+<div class="verbadge" id="verBadge" title="HelioWatch 1.0.0, built Nov 16, 2026 from commit d96cc02">v1.0.0 · d96cc02 · Nov 16, 2026</div>
 <div class="app">
 <nav class="rail" id="tabs" aria-label="Sections">
   <div class="mark" title="HelioWatch"><svg width="28" height="28" viewBox="0 0 26 26" aria-hidden="true">
@@ -1962,6 +1962,7 @@ function renderControl() {
     '<input type="number" id="gaz" value="' + ctlAz().toFixed(1) + '" min="' + M.az_range[0] + '" max="' + M.az_range[1] + '" step="0.5" aria-label="Target azimuth">' +
     '<input type="number" id="gel" value="' + ctlEl().toFixed(1) + '" min="' + M.el_range[0] + '" max="' + M.el_range[1] + '" step="0.5" aria-label="Target elevation">' +
     '<button class="btn" data-act="goto"' + dis + '>Send</button>' +
+    '<button class="btn" data-act="setpos" title="Tell the tracker it is at these angles now. Nothing moves.">Set as current</button>' +
     '<span class="note">Commands reach the tracker within about a second in Manual mode. Motion needs <b>manual</b> mode, as in the firmware. Arrow keys jog, or steer when the joystick is showing.</span></div>';
   h += '</div><div class="cm-side"><span class="hdg">' + n(CTL.az, 0) + '°</span>' + compass() +
     '<span class="coords">' + Math.abs(M.lat).toFixed(4) + '° ' + (M.lat >= 0 ? 'N' : 'S') + ' · ' + Math.abs(M.lon).toFixed(4) + '° ' + (M.lon >= 0 ? 'E' : 'W') + '</span>' +
@@ -1986,6 +1987,10 @@ function renderControl() {
         var az = clamp(parseFloat($('gaz').value) || ctlAz(), M.az_range[0], M.az_range[1]);
         var ev = clamp(parseFloat($('gel').value) || ctlEl(), M.el_range[0], M.el_range[1]);
         issue('goto', { az: az, el: ev }, 'az ' + az.toFixed(1) + '° / el ' + ev.toFixed(1) + '°');
+      } else if (a === 'setpos') {
+        var paz = parseFloat($('gaz').value), pel = parseFloat($('gel').value);
+        if (isNaN(paz) || isNaN(pel)) return;
+        issue('set_position', { az: paz, el: pel }, 'set current position · az ' + paz.toFixed(1) + '° / el ' + pel.toFixed(1) + '°');
       } else if (a === 'sun') {
         var saz = clamp(LAST.sun_az, M.az_range[0], M.az_range[1]), sel = clamp(LAST.sun_el, M.el_range[0], M.el_range[1]);
         issue('goto', { az: saz, el: sel }, 'point at the sun · az ' + saz.toFixed(1) + '° / el ' + sel.toFixed(1) + '°');
