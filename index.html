@@ -672,7 +672,7 @@ input.scrub::-moz-range-thumb{width:14px;height:14px;border-radius:50%;backgroun
 </style>
 
 <div class="gate" id="gate" hidden></div>
-<div class="verbadge" id="verBadge" title="HelioWatch 1.0.0, built Nov 18, 2026 from commit bedb1f4">v1.0.0 · bedb1f4 · Nov 18, 2026</div>
+<div class="verbadge" id="verBadge" title="HelioWatch 1.0.0, built Nov 18, 2026 from commit 67790fa">v1.0.0 · 67790fa · Nov 18, 2026</div>
 <div class="app">
 <nav class="rail" id="tabs" aria-label="Sections">
   <div class="mark" title="HelioWatch"><svg width="28" height="28" viewBox="0 0 26 26" aria-hidden="true">
@@ -840,12 +840,12 @@ input.scrub::-moz-range-thumb{width:14px;height:14px;border-radius:50%;backgroun
    shows the real machine. A reading the tracker does not send yet stays null,
    and the console shows it as missing rather than as zero. The sun's position
    is computed from the time and the site, which is astronomy, not a guess.
-   It then polls for new samples every 2 s and tells the console to redraw. */
+   It then polls for new samples twice a second and tells the console to redraw. */
 (function () {
   'use strict';
   var WINDOW_H = 24;                   /* history loaded at sign-in */
   var PAGE = 1000;                     /* PostgREST's row cap per request */
-  var POLL_MS = 2000;                  /* fast enough for the 3D model to follow a jog */
+  var POLL_MS = 500;                   /* quick enough that covering a light sensor shows promptly */
 
   /* the machine's own limits, from the team's design (not measurements) */
   var MACHINE = {
@@ -982,9 +982,8 @@ input.scrub::-moz-range-thumb{width:14px;height:14px;border-radius:50%;backgroun
   window.hwLiveFollow = function () {
     var st = window.HW_LIVE; if (!st || st.timer) return;
     st.timer = setInterval(async function () {
-      /* every POLL_MS, or every half second while the joystick is steering */
-      var fast = (window.hwLiveFast || 0) > Date.now();
-      if (st.busy || (!fast && Date.now() - (st.lastPoll || 0) < POLL_MS)) return;
+      /* a hidden tab stops asking, and catches up from the last row when it returns */
+      if (st.busy || document.hidden || Date.now() - (st.lastPoll || 0) < POLL_MS) return;
       st.busy = true; st.lastPoll = Date.now();
       try {
         var fresh = await fetchSince(st.sb, st.tr, null, st.rows[st.rows.length - 1].id);
@@ -996,7 +995,7 @@ input.scrub::-moz-range-thumb{width:14px;height:14px;border-radius:50%;backgroun
         dispatchEvent(new CustomEvent('hw:data', { detail: st.tr.device_id }));
       } catch (e) { /* a missed poll is retried on the next tick */ }
       finally { st.busy = false; }
-    }, 500);
+    }, 100);
   };
 })();
 /* ══ HelioWatch — published site bootstrap ═══════════════════════════
@@ -2056,7 +2055,6 @@ function joySend(force) {
   if (!zero) JOY.drove = true;
   if (JOY.inflight) { JOY.pending = true; return; }
   JOY.inflight = true; JOY.sent = v; JOY.lastSend = Date.now();
-  window.hwLiveFast = Date.now() + 6000;              /* web/live.js polls faster while steering */
   ACCT.sb.from('commands').insert({ team_id: tr.team_id, tracker_id: tr.id, type: 'drive', params: { az: v.az, el: v.el, ms: JOY_MS },
     label: zero ? 'joystick released' : 'joystick', expires_at: new Date(Date.now() + 3000).toISOString() }).then(function (r) {
     JOY.inflight = false; JOY.err = r.error ? r.error.message : ''; joyPaint();
@@ -2759,6 +2757,10 @@ addEventListener('hw:data', function (e) {
   if (e.detail !== siteId) return;
   var before = JSON.stringify(HAS);
   loadSiteData(siteId, true);           /* keeps the operator's pose and command queue */
+  /* the Status tab's device card shows the same new sample straight away */
+  var L = window.HW_LIVE, newest = L && L.rows[L.rows.length - 1];
+  var card = newest && DEV.trackers && DEV.trackers.find(function (x) { return x.device_id === L.tr.device_id; });
+  if (card) { card.last_sample = newest.sample; card.last_seen_at = newest.received_at; devPaint(); }
   if (JSON.stringify(HAS) !== before) rebuildCharts();
   renderAll();
   if (current !== 'status' && VIEWS[current] && VIEWS[current][1]) VIEWS[current][1]();
@@ -2898,7 +2900,8 @@ async function acctRun(fn, okMsg) {
 /* ── live device card (Status tab) ──
    The team's real trackers, as the ingest function last heard from them. The
    rest of the console draws the same telemetry; this card is about the board
-   itself and its link. Polled every 5 s while signed in. */
+   itself and its link. Redrawn with each new sample, and polled every 5 s so
+   it still notices when the board goes quiet. */
 var DEV = { trackers: null, err: '' };
 window.HW_DEV = DEV;                       /* the 3D inspector's controller panel reads this too */
 var DEV_ONLINE_S = 30;                     /* posts are ~5 s apart, but a slow TLS handshake can stretch one past 20 s */
