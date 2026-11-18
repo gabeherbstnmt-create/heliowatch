@@ -669,36 +669,56 @@ input.scrub::-moz-range-thumb{width:14px;height:14px;border-radius:50%;backgroun
   .top .vsub{display:none}
   .fxr{grid-template-columns:86px minmax(40px,1fr) 104px}
 }
-/* ── assistant ── */
-.main{padding-bottom:104px}
-.ai{position:fixed;z-index:44;bottom:14px;left:calc(92px + (100vw - 92px) / 2);transform:translateX(-50%);width:min(640px,calc(100vw - 132px));
-  background:var(--card);border:1px solid var(--line-2);border-radius:18px;box-shadow:var(--sh);overflow:hidden}
-.ai-head{display:flex;align-items:center;justify-content:space-between;padding:10px 10px 10px 16px;border-bottom:1px solid var(--line);font-size:13px;color:var(--ink-2)}
-.ai-x{width:30px;height:30px;border:0;border-radius:9px;background:transparent;color:var(--muted);display:grid;place-items:center;cursor:pointer}
+/* ── Billy, the assistant ── */
+.main{padding-bottom:92px}
+.verbadge{right:98px}
+.ai{position:fixed;z-index:46;right:18px;bottom:14px}
+.billy{position:relative;display:block;width:68px;height:66px;padding:0;border:0;background:transparent;cursor:pointer;-webkit-tap-highlight-color:transparent}
+.billy svg{display:block;width:100%;height:100%;overflow:visible}
+.billy:focus-visible{outline:2px solid var(--accent);outline-offset:3px;border-radius:50%}
+.billy .b-body{fill:var(--accent);transform-box:fill-box;transform-origin:50% 100%;animation:billybreathe 3.6s ease-in-out infinite}
+.billy .b-shine{fill:#fff;opacity:.34}
+.billy .b-shadow{fill:#000;opacity:.2;transform-box:fill-box;transform-origin:50% 50%;animation:billyshadow 3.6s ease-in-out infinite}
+.billy .b-face{transform-box:fill-box;transform-origin:50% 100%;animation:billyface 3.6s ease-in-out infinite}
+.billy .b-eye{fill:var(--on-accent);transform-box:fill-box;transform-origin:50% 50%;animation:billyblink 5.2s infinite}
+.billy .b-smile{fill:none;stroke:var(--on-accent);stroke-width:2.4;stroke-linecap:round}
+.billy:hover .b-body,.billy:hover .b-face{animation:billyhop .6s ease-in-out}
+.billy.busy .b-body,.billy.busy .b-face{animation:billywobble .7s ease-in-out infinite}
+.billy.busy .b-eye{animation:billylook 1.4s ease-in-out infinite}
+.billy.new::after{content:"";position:absolute;right:5px;top:5px;width:12px;height:12px;border-radius:50%;background:var(--crit);border:2px solid var(--page)}
+@keyframes billybreathe{50%{transform:scale(1.035,.955)}}
+@keyframes billyface{50%{transform:translateY(1.6px)}}
+@keyframes billyshadow{50%{transform:scaleX(1.06)}}
+@keyframes billyblink{0%,94%,100%{transform:scaleY(1)}97%{transform:scaleY(.1)}}
+@keyframes billyhop{40%{transform:translateY(-7px) scale(.97,1.04)}75%{transform:translateY(0) scale(1.05,.94)}}
+@keyframes billywobble{25%{transform:rotate(-5deg) scale(1.02,.97)}75%{transform:rotate(5deg) scale(.98,1.03)}}
+@keyframes billylook{0%,100%{transform:translateX(-2px)}50%{transform:translateX(2px)}}
+.ai-panel{position:absolute;right:0;bottom:76px;width:min(372px,calc(100vw - 24px));display:flex;flex-direction:column;background:var(--card);border:1px solid var(--line-2);border-radius:18px;box-shadow:var(--sh-lg);overflow:hidden}
+.ai-panel[hidden]{display:none}
+.ai-head{display:flex;align-items:center;justify-content:space-between;padding:10px 10px 10px 16px;border-bottom:1px solid var(--line);font-size:14px;font-weight:500;color:var(--ink)}
+.ai-x{width:32px;height:32px;border:0;border-radius:9px;background:transparent;color:var(--muted);display:grid;place-items:center;cursor:pointer}
 .ai-x:hover{color:var(--ink);background:var(--sunken)}
 .ai-x svg,.ai-go svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:2.2;stroke-linecap:round;stroke-linejoin:round}
-.ai-log{max-height:min(44vh,380px);overflow-y:auto;padding:14px 16px;display:flex;flex-direction:column;gap:10px;font-size:14px;line-height:1.45}
-.ai-m{max-width:86%;white-space:pre-wrap;overflow-wrap:anywhere}
+.ai-log{min-height:96px;max-height:min(46vh,360px);overflow-y:auto;padding:14px 16px;display:flex;flex-direction:column;gap:10px;font-size:14px;line-height:1.45}
+.ai-m{max-width:88%;white-space:pre-wrap;overflow-wrap:anywhere}
 .ai-m.me{align-self:flex-end;background:var(--sunken);color:var(--ink);padding:8px 12px;border-radius:12px}
 .ai-m.it{align-self:flex-start;color:var(--ink)}
-.ai-m.wait{color:var(--muted);animation:aipulse 1.4s ease-in-out infinite}
-@keyframes aipulse{50%{opacity:.45}}
-.ai-tips{display:flex;flex-wrap:wrap;gap:6px;padding:10px 12px 0}
+.ai-m.wait{color:var(--muted)}
+.ai-tips{display:flex;flex-wrap:wrap;gap:6px;padding:0 14px 12px}
+.ai-tips[hidden]{display:none}
 .ai-tip{border:1px solid var(--line-2);background:transparent;color:var(--ink-2);border-radius:999px;padding:6px 11px;font:inherit;font-size:12.5px;cursor:pointer}
 .ai-tip:hover{color:var(--ink);border-color:var(--muted)}
-.ai-bar{display:flex;align-items:center;gap:8px;padding:8px 8px 8px 16px}
+.ai-bar{display:flex;align-items:center;gap:8px;padding:8px 8px 8px 16px;border-top:1px solid var(--line)}
 .ai-bar input{flex:1;min-width:0;height:38px;border:0;outline:0;background:transparent;color:var(--ink);font:inherit;font-size:14.5px}
 .ai-bar input::placeholder{color:var(--muted)}
-.ai:focus-within{border-color:var(--accent)}
 .ai-go{flex:none;width:38px;height:38px;border:0;border-radius:12px;background:var(--accent);color:var(--on-accent);display:grid;place-items:center;cursor:pointer}
-.ai-go:disabled{opacity:.4;cursor:not-allowed}
 .ai-go.stop{background:var(--crit);color:#fff}
-@media (prefers-reduced-motion:reduce){.ai-m.wait{animation:none}}
-@media (max-width:760px){.main{padding-bottom:172px}.ai{left:12px;right:12px;width:auto;transform:none;bottom:88px}.ai-log{max-height:38vh}.verbadge{display:none}}
+@media (prefers-reduced-motion:reduce){.billy .b-body,.billy .b-face,.billy .b-eye,.billy .b-shadow{animation:none!important}}
+@media (max-width:760px){.main{padding-bottom:172px}.verbadge{display:none}.ai{right:12px;bottom:86px}.billy{width:58px;height:56px}.ai-panel{bottom:64px}.ai-log{max-height:36vh}.ai-bar input{font-size:16px}}
 </style>
 
 <div class="gate" id="gate" hidden></div>
-<div class="verbadge" id="verBadge" title="HelioWatch 1.0.0, built Nov 18, 2026 from commit f15e87f">v1.0.0 · f15e87f · Nov 18, 2026</div>
+<div class="verbadge" id="verBadge" title="HelioWatch 1.0.0, built Nov 18, 2026 from commit b214685">v1.0.0 · b214685 · Nov 18, 2026</div>
 <div class="app">
 <nav class="rail" id="tabs" aria-label="Sections">
   <div class="mark" title="HelioWatch"><svg width="28" height="28" viewBox="0 0 26 26" aria-hidden="true">
@@ -2971,47 +2991,65 @@ function devPaint() {
 DEV.onlineS = DEV_ONLINE_S; DEV.ago = devAgo; DEV.uptime = devUptime; DEV.esc = esc;
 setInterval(devPoll, 5000);
 
-/* ── assistant ──
-   The chat box along the bottom. supabase/functions/assistant does the thinking
-   and queues any moves as this person, so their role limits it like the Control
+/* ── Billy, the assistant ──
+   The little blob in the corner. supabase/functions/assistant does the thinking
+   and queues any moves as this person, so their role limits him like the Control
    tab. The conversation lives only in this tab. */
-var AI = { msgs: [], busy: false };
+var AI = { msgs: [], busy: false, open: false };
 var AI_TIPS = ['What is the average light reading?', 'Tilt back and forth 2 times', 'Face the wall'];
+var AI_SEND = '<svg viewBox="0 0 24 24"><path d="M12 19V5M6 11l6-6 6 6"/></svg>';
+var AI_STOP = '<svg viewBox="0 0 24 24"><rect x="7" y="7" width="10" height="10" rx="1.5" fill="currentColor" stroke="none"/></svg>';
 function aiBuild() {
-  var box = el('section', 'ai', '<div class="ai-head" id="aiHead" hidden><span>Assistant</span><button type="button" class="ai-x" id="aiClose" aria-label="Close the conversation">' +
-    '<svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></button></div><div class="ai-log" id="aiLog" role="log" aria-live="polite" hidden></div>' +
-    '<div class="ai-tips" id="aiTips" hidden>' + AI_TIPS.map(function (t) { return '<button type="button" class="ai-tip">' + esc(t) + '</button>'; }).join('') + '</div>' +
-    '<form class="ai-bar" id="aiForm"><input id="aiInput" maxlength="600" autocomplete="off" placeholder="Ask about the tracker or tell it what to do" aria-label="Message the assistant">' +
-    '<button type="submit" class="ai-go" id="aiGo" aria-label="Send"><svg viewBox="0 0 24 24"><path d="M12 19V5M6 11l6-6 6 6"/></svg></button></form>');
-  box.setAttribute('aria-label', 'Assistant');
+  var box = el('section', 'ai',
+    '<div class="ai-panel" id="aiPanel" role="dialog" aria-label="Chat with Billy" hidden>' +
+      '<div class="ai-head"><span>Billy</span><button type="button" class="ai-x" id="aiClose" aria-label="Close Billy"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></button></div>' +
+      '<div class="ai-log" id="aiLog" role="log" aria-live="polite"><div class="ai-m it">Hi, I\'m Billy. Ask me about the tracker or tell me how to move the panel.</div></div>' +
+      '<div class="ai-tips" id="aiTips">' + AI_TIPS.map(function (t) { return '<button type="button" class="ai-tip">' + esc(t) + '</button>'; }).join('') + '</div>' +
+      '<form class="ai-bar" id="aiForm"><input id="aiInput" maxlength="600" autocomplete="off" placeholder="Ask Billy" aria-label="Message Billy">' +
+      '<button type="submit" class="ai-go" id="aiGo" aria-label="Send">' + AI_SEND + '</button></form>' +
+    '</div>' +
+    '<button type="button" class="billy" id="billy" aria-label="Open Billy" aria-expanded="false" title="Billy">' +
+      '<svg viewBox="0 0 68 66" aria-hidden="true"><ellipse class="b-shadow" cx="34" cy="61" rx="22" ry="3.6"/>' +
+      '<path class="b-body" d="M34 7c13.5-.6 25.5 10 27 24.5C62.400 46 55 59 34.500 59.500 14 60 5.600 48 6.500 33.500 7.400 19 19.500 7.600 34 7z"/>' +
+      '<g class="b-face"><ellipse class="b-shine" cx="22" cy="19" rx="7" ry="4.200" transform="rotate(-28 22 19)"/>' +
+      '<ellipse class="b-eye" cx="25.500" cy="31" rx="3.300" ry="4.400"/><ellipse class="b-eye" cx="43" cy="31" rx="3.300" ry="4.400"/>' +
+      '<path class="b-smile" d="M29 41c2.800 3.200 7.700 3.200 10.500 0"/></g></svg>' +
+    '</button>');
+  box.setAttribute('aria-label', 'Billy');
   document.querySelector('.app').appendChild(box);
-  var input = $('aiInput');
-  input.onfocus = function () { $('aiTips').hidden = AI.msgs.length > 0; };
-  input.onblur = function () { setTimeout(function () { if (document.activeElement !== input) $('aiTips').hidden = true; }, 150); };
   box.querySelectorAll('.ai-tip').forEach(function (b) { b.onclick = function () { aiSend(b.textContent); }; });
-  $('aiClose').onclick = function () { $('aiLog').hidden = true; $('aiHead').hidden = true; };
+  $('billy').onclick = function () { aiOpen(!AI.open); };
+  $('aiClose').onclick = function () { aiOpen(false); $('billy').focus(); };
+  box.addEventListener('keydown', function (e) { if (e.key === 'Escape' && AI.open) { aiOpen(false); $('billy').focus(); } });
   $('aiForm').onsubmit = function (e) {
     e.preventDefault();
-    if (AI.busy) { issue('set_mode', { mode: 'idle' }, 'assistant stop button'); return; }
-    aiSend(input.value);
+    if (AI.busy) { issue('set_mode', { mode: 'idle' }, 'Billy stop button'); return; }
+    aiSend($('aiInput').value);
   };
+}
+function aiOpen(on) {
+  AI.open = on; $('aiPanel').hidden = !on;
+  var b = $('billy'); b.classList.remove('new');
+  b.setAttribute('aria-expanded', on ? 'true' : 'false'); b.setAttribute('aria-label', on ? 'Close Billy' : 'Open Billy');
+  if (on) { var log = $('aiLog'); log.scrollTop = log.scrollHeight; $('aiInput').focus(); }
 }
 function aiAdd(cls, text) {
   var m = el('div', 'ai-m ' + cls); m.textContent = text;
-  var log = $('aiLog'); log.appendChild(m); log.hidden = false; $('aiHead').hidden = false; log.scrollTop = log.scrollHeight;
+  var log = $('aiLog'); log.appendChild(m); log.scrollTop = log.scrollHeight;
   return m;
 }
 function aiBusy(on) {
   AI.busy = on; var go = $('aiGo');
+  $('billy').classList.toggle('busy', on);
   go.classList.toggle('stop', on); go.setAttribute('aria-label', on ? 'Stop the panel' : 'Send');
-  go.innerHTML = on ? '<svg viewBox="0 0 24 24"><rect x="7" y="7" width="10" height="10" rx="1.5" fill="currentColor" stroke="none"/></svg>' : '<svg viewBox="0 0 24 24"><path d="M12 19V5M6 11l6-6 6 6"/></svg>';
+  go.innerHTML = on ? AI_STOP : AI_SEND;
 }
 async function aiSend(text) {
   text = String(text || '').trim();
   if (!text || AI.busy) return;
   $('aiInput').value = ''; $('aiTips').hidden = true;
   aiAdd('me', text); AI.msgs.push({ role: 'user', content: text });
-  var wait = aiAdd('it wait', 'Working…'); aiBusy(true);
+  var wait = aiAdd('it wait', 'Billy is working…'); aiBusy(true);
   var reply;
   try {
     var r = await ACCT.sb.functions.invoke('assistant', { body: { messages: AI.msgs.slice(-20) } });
@@ -3019,10 +3057,11 @@ async function aiSend(text) {
     reply = (r.data && r.data.reply) || 'No answer came back.';
     AI.msgs.push({ role: 'assistant', content: reply });
   } catch (e) {
-    reply = 'The assistant could not be reached. Check that you are signed in and try again.';
+    reply = 'Billy could not be reached. Check that you are signed in and try again.';
     AI.msgs.pop();
   }
   wait.remove(); aiAdd('it', reply); aiBusy(false);
+  if (!AI.open) $('billy').classList.add('new');
 }
 aiBuild();
 
