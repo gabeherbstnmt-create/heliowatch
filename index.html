@@ -669,6 +669,17 @@ input.scrub::-moz-range-thumb{width:14px;height:14px;border-radius:50%;backgroun
   .top .vsub{display:none}
   .fxr{grid-template-columns:86px minmax(40px,1fr) 104px}
 }
+/* ── motor speed ── */
+.spd{display:grid;grid-template-columns:minmax(170px,auto) minmax(0,1fr) 84px;align-items:center;gap:22px;margin:14px 0;padding:16px 22px}
+.spd-t label{display:block;font-size:14px;font-weight:500;color:var(--ink)}
+.spd-t .cap{display:block;margin-top:2px}
+.spd-r{display:flex;align-items:center;gap:12px;min-width:0}
+.spd-e{font-size:12.5px;color:var(--muted)}
+.spd input.scrub{box-sizing:content-box;min-width:0;padding:12px 0;background-clip:content-box;cursor:pointer}
+.spd input.scrub:focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:6px}
+.spd-v{font-size:26px;font-weight:300;letter-spacing:-.03em;text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+.spd-v small{font-size:13px;color:var(--muted);margin-left:3px;letter-spacing:0}
+@media (max-width:760px){.spd{grid-template-columns:minmax(0,1fr) auto;gap:6px 14px;padding:14px 16px}.spd-r{grid-column:1/-1;grid-row:2}}
 /* ── Billy, the assistant ── */
 .main{padding-bottom:92px}
 .verbadge{right:98px}
@@ -718,7 +729,7 @@ input.scrub::-moz-range-thumb{width:14px;height:14px;border-radius:50%;backgroun
 </style>
 
 <div class="gate" id="gate" hidden></div>
-<div class="verbadge" id="verBadge" title="HelioWatch 1.0.0, built Nov 18, 2026 from commit b214685">v1.0.0 · b214685 · Nov 18, 2026</div>
+<div class="verbadge" id="verBadge" title="HelioWatch 1.0.0, built Nov 18, 2026 from commit fc40081">v1.0.0 · fc40081 · Nov 18, 2026</div>
 <div class="app">
 <nav class="rail" id="tabs" aria-label="Sections">
   <div class="mark" title="HelioWatch"><svg width="28" height="28" viewBox="0 0 26 26" aria-hidden="true">
@@ -827,6 +838,11 @@ input.scrub::-moz-range-thumb{width:14px;height:14px;border-radius:50%;backgroun
   <!-- CONTROL -->
   <section data-view="control" hidden>
     <div class="card ctl3d"><div class="twinroot stagebg" id="ctlviewer"></div></div>
+    <div class="card spd">
+      <div class="spd-t"><label for="spdIn">Motor speed</label><span class="cap" id="spdN"></span></div>
+      <div class="spd-r"><span class="spd-e">Slow</span><input type="range" class="scrub" id="spdIn" min="1" max="20" step="1" value="5"><span class="spd-e">Fast</span></div>
+      <output class="spd-v" id="spdV" for="spdIn">5<small>°/s</small></output>
+    </div>
     <div id="ctl"></div>
     <div class="card trj" id="trj"></div>
     <div class="grid g2" style="margin-top:14px">
@@ -1815,6 +1831,29 @@ var CMD_WORD = { queued: 'queued', sent: 'sent', accepted: 'accepted', completed
 var CMD_CLS = { queued: 'queued', sent: 'sent', accepted: 'done', completed: 'done', failed: 'rejected',
   rejected: 'rejected', expired: 'rejected', stale: 'rejected' };
 CTL.local = []; CTL.modeAt = 0; CTL.seen = {};
+/* the speed slider, remembered in this browser; every move carries it to the board */
+var SPEED_KEY = 'hw-motor-speed', SPEED_DEFAULT = 5;
+CTL.speed = (function () {
+  try { var v = parseInt(localStorage.getItem(SPEED_KEY), 10); if (v >= 1 && v <= 20) return v; } catch (e) {}
+  return SPEED_DEFAULT;
+})();
+function speedPaint() {
+  var v = CTL.speed, s = $('spdIn'); if (!s) return;
+  s.value = v; s.setAttribute('aria-valuetext', v + ' degrees per second');
+  setHTML('spdV', v + '<small>°/s</small>');
+  setText('spdN', v > 8 ? 'Auto tops out at 8°/s' : 'Moves, joystick and Auto');
+}
+function speedBind() {
+  var s = $('spdIn'); if (!s) return;
+  speedPaint();
+  s.oninput = function () {
+    CTL.speed = parseInt(s.value, 10); speedPaint();
+    try { localStorage.setItem(SPEED_KEY, String(CTL.speed)); } catch (e) {}
+    if (current === 'control' && CTL.input === 'stick') joyPaint();
+  };
+  /* Auto is already running, so tell it now; everything else picks it up on its next move */
+  s.onchange = function () { if (CTL.mode === 'auto') issue('set_mode', { mode: 'auto' }, 'auto speed ' + CTL.speed + '°/s'); };
+}
 function cmdTracker() { var L = window.HW_LIVE; return L && L.tr && ACCT.sb && ACCT.mode === 'signedin' ? L.tr : null; }
 function issue(type, params, label) {
   var reject = !cmdTracker() ? 'not connected to the tracker'
@@ -1826,6 +1865,7 @@ function issue(type, params, label) {
     CTL.local.unshift({ id: '—', label: label + ' — ' + reject, status: 'rejected', at: Date.now() });
     renderQueue(); return Promise.resolve(false);
   }
+  if (['jog', 'goto', 'home', 'stow'].indexOf(type) >= 0 || (type === 'set_mode' && params.mode === 'auto')) params = Object.assign({}, params, { dps: CTL.speed });
   var tr = cmdTracker(), tmp = { id: '…', label: label, status: 'queued', at: Date.now() };
   cmdFastUntil = Date.now() + 15000;
   CTL.local.unshift(tmp); renderQueue();
@@ -2088,7 +2128,7 @@ function renderControl() {
    3 s, so a late one is never acted on, and they are kept out of the
    command list, which would otherwise fill with them. */
 var JOY = { on: false, vx: 0, vy: 0, sent: null, lastSend: 0, inflight: false, pending: false, timer: null, err: '', redraw: false, keys: {}, drove: false };
-var JOY_MS = 1200, JOY_EVERY = 400, JOY_DPS = { az: 10, el: 8 };   /* full-stick speeds, as in the firmware */
+var JOY_MS = 1200, JOY_EVERY = 400;                                   /* full stick is the speed slider's setting */
 CTL.input = (function () { try { return localStorage.getItem('hw-ctl-input') === 'stick' ? 'stick' : 'pad'; } catch (e) { return 'pad'; } })();
 function joyOk() { return !!cmdTracker() && canCommand() && CTL.mode === 'manual' && !CTL.estop; }
 function joySend(force) {
@@ -2101,7 +2141,7 @@ function joySend(force) {
   if (!zero) JOY.drove = true;
   if (JOY.inflight) { JOY.pending = true; return; }
   JOY.inflight = true; JOY.sent = v; JOY.lastSend = Date.now();
-  ACCT.sb.from('commands').insert({ team_id: tr.team_id, tracker_id: tr.id, type: 'drive', params: { az: v.az, el: v.el, ms: JOY_MS },
+  ACCT.sb.from('commands').insert({ team_id: tr.team_id, tracker_id: tr.id, type: 'drive', params: { az: v.az, el: v.el, ms: JOY_MS, dps: CTL.speed },
     label: zero ? 'joystick released' : 'joystick', expires_at: new Date(Date.now() + 3000).toISOString() }).then(function (r) {
     JOY.inflight = false; JOY.err = r.error ? r.error.message : ''; joyPaint();
     if (JOY.pending) { JOY.pending = false; joySend(true); }
@@ -2153,15 +2193,15 @@ function joyPaint() {
   var st = $('joyStatus'); if (!st) return;
   var pct = function (v) { return Math.round(Math.abs(v) * 100) + '%'; };
   var parts = [];
-  if (JOY.vx) parts.push('Turning <b>' + (JOY.vx > 0 ? 'right' : 'left') + '</b> ' + pct(JOY.vx) + ' · ' + (Math.abs(JOY.vx) * JOY_DPS.az).toFixed(0) + '°/s');
-  if (JOY.vy) parts.push('Tilting <b>' + (JOY.vy > 0 ? 'up' : 'down') + '</b> ' + pct(JOY.vy) + ' · ' + (Math.abs(JOY.vy) * JOY_DPS.el).toFixed(0) + '°/s');
+  if (JOY.vx) parts.push('Turning <b>' + (JOY.vx > 0 ? 'right' : 'left') + '</b> ' + pct(JOY.vx) + ' · ' + (Math.abs(JOY.vx) * CTL.speed).toFixed(1) + '°/s');
+  if (JOY.vy) parts.push('Tilting <b>' + (JOY.vy > 0 ? 'up' : 'down') + '</b> ' + pct(JOY.vy) + ' · ' + (Math.abs(JOY.vy) * CTL.speed).toFixed(1) + '°/s');
   st.innerHTML = JOY.err ? '<span style="color:var(--crit-ink)">' + esc(JOY.err) + '</span>'
     : JOY.on ? (parts.length ? parts.join('<br>') : 'Centred · holding still') + '<br><span style="color:var(--muted)">az ' + n(CTL.az, 1) + '° · el ' + n(CTL.el, 1) + '° · release to stop</span>'
     : !cmdTracker() ? 'Sign in and connect the tracker to steer it.'
     : !canCommand() ? 'Your role can watch but not steer.'
     : CTL.estop ? 'Emergency stop latched. Clear faults first.'
     : CTL.mode !== 'manual' ? 'Switch to <b>Manual</b> to steer with the joystick.'
-    : 'Drag to steer, further for faster (up to ' + JOY_DPS.az + '°/s turn, ' + JOY_DPS.el + '°/s tilt). Let go to stop.';
+    : 'Drag to steer, further for faster (up to ' + CTL.speed + '°/s). Let go to stop.';
 }
 /* arrow keys steer at half speed while the joystick is showing; releasing them stops */
 function joyKeys() {
@@ -3052,7 +3092,7 @@ async function aiSend(text) {
   var wait = aiAdd('it wait', 'Billy is working…'); aiBusy(true);
   var reply;
   try {
-    var r = await ACCT.sb.functions.invoke('assistant', { body: { messages: AI.msgs.slice(-20) } });
+    var r = await ACCT.sb.functions.invoke('assistant', { body: { messages: AI.msgs.slice(-20), speed_dps: CTL.speed } });
     if (r.error) throw r.error;
     reply = (r.data && r.data.reply) || 'No answer came back.';
     AI.msgs.push({ role: 'assistant', content: reply });
@@ -3064,6 +3104,7 @@ async function aiSend(text) {
   if (!AI.open) $('billy').classList.add('new');
 }
 aiBuild();
+speedBind();
 
 /* ── the sign-in page ── */
 function gateHTML() {
