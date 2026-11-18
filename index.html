@@ -308,6 +308,13 @@ input[type=number]:focus{outline:none;border-color:var(--accent)}
 .twinroot .tw-rows dt,.twinroot .tw-rows dd{padding:10px 0;border-top:1px solid var(--line)}
 .twinroot .tw-rows dt{color:var(--ink-2)}
 .twinroot .tw-rows dd{margin:0;text-align:right;font-weight:500}
+.twinroot .tw-ldr{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:16px}
+.twinroot .tw-ldr div{border:1px solid var(--line);border-radius:10px;padding:10px 12px;min-width:0}
+.twinroot .tw-ldr span{display:block;font-size:12px;color:var(--ink-2)}
+.twinroot .tw-ldr b{display:block;font-family:var(--mono);font-size:20px;font-weight:400;margin-top:4px}
+.twinroot .tw-ldr .off b{font-family:var(--ui);font-size:13.5px;color:var(--muted);line-height:26px}
+.twinroot .tw-ldr i{display:block;height:4px;border-radius:2px;background:var(--line);margin-top:8px;overflow:hidden}
+.twinroot .tw-ldr i u{display:block;height:100%;background:var(--sun)}
 .twinroot .tw-note{font-size:12.5px;color:var(--muted);line-height:1.55;margin:14px 0 0}
 .twinroot .tw-empty{font-size:13px;color:var(--muted);line-height:1.55;margin:8px 0 0}
 .twinroot .tw-grp{font-size:12px;color:var(--muted);padding:14px 10px 6px}
@@ -605,7 +612,11 @@ table.wp td.x{width:34px}
 #efSvg .casing.idle{opacity:.07}
 #efSvg .core{fill:none;stroke-width:6;stroke-linecap:round;stroke-linejoin:round;stroke-dasharray:12 14;animation:efflow var(--d,2s) linear infinite}
 #efSvg .core.idle{animation:none;opacity:.22;stroke-dasharray:none}
-#efSvg .ghost{fill:none;stroke:var(--line-2);stroke-width:2;stroke-dasharray:3 7}
+#efSvg .core.read{stroke-width:2.5;stroke-dasharray:4 9}
+#efSvg .core.read.idle{stroke-dasharray:4 9;opacity:.4}
+#efSvg .core.cut{stroke:var(--muted);stroke-width:2;stroke-dasharray:3 7;animation:none;opacity:.7}
+#efSvg .casing.cut{opacity:0}
+#efSvg .lg{font-size:12px;fill:var(--ink-2)}
 #efSvg .node rect{fill:var(--card);stroke:var(--line-2);stroke-width:1}
 #efSvg .node .nt{font-size:13px;fill:var(--ink-2)}
 #efSvg .node .nv{font-size:30px;font-weight:300;fill:var(--ink);letter-spacing:-1.2px}
@@ -661,7 +672,7 @@ input.scrub::-moz-range-thumb{width:14px;height:14px;border-radius:50%;backgroun
 </style>
 
 <div class="gate" id="gate" hidden></div>
-<div class="verbadge" id="verBadge" title="HelioWatch 1.0.0, built Nov 16, 2026 from commit d96cc02">v1.0.0 · d96cc02 · Nov 16, 2026</div>
+<div class="verbadge" id="verBadge" title="HelioWatch 1.0.0, built Nov 18, 2026 from commit bedb1f4">v1.0.0 · bedb1f4 · Nov 18, 2026</div>
 <div class="app">
 <nav class="rail" id="tabs" aria-label="Sections">
   <div class="mark" title="HelioWatch"><svg width="28" height="28" viewBox="0 0 26 26" aria-hidden="true">
@@ -760,10 +771,9 @@ input.scrub::-moz-range-thumb{width:14px;height:14px;border-radius:50%;backgroun
           <button id="efPlay" aria-pressed="false">Play the day</button><button id="efNow" aria-pressed="false">Latest</button>
         </div>
       </div>
-      <div class="efwrap"><svg id="efSvg" viewBox="0 0 1240 560" role="img" aria-label="Energy flow diagram"></svg></div>
+      <div class="efwrap"><svg id="efSvg" viewBox="0 0 1240 580" role="img" aria-label="Energy flow: the sun lights the solar array and light sensors, which the Arduino only reads. The battery pack powers the H-bridge, the motors and the Arduino."></svg></div>
       <div class="efbar"><span class="t" id="efT">—</span><input type="range" class="scrub" id="efScrub" min="0" max="1" value="1" aria-label="Moment shown"></div>
-      <p class="ef-note">Array output and motor current are metered at the tracker. Motor power is current times pack voltage. The Arduino's own draw is not metered.
-        The parts list has no charge controller, so no charging path is drawn from the array to the pack &mdash; the dotted line marks where one would go.</p>
+      <p class="ef-note">Solid lines carry power. Dotted lines carry readings and signals only. The solar array is measured on pin A2 and does not charge the pack. Pack voltage and motor current are not measured yet, so this page shows no watts.</p>
     </div>
     <div class="kpis" id="efKpi"></div>
   </section>
@@ -847,7 +857,8 @@ input.scrub::-moz-range-thumb{width:14px;height:14px;border-radius:50%;backgroun
     'el_pos_deg', 'el_error_deg', 'el_current_a', 'el_temp_c', 'el_moving_s',
     'panel_w', 'irradiance_wm2', 'wind_ms', 'ambient_c', 'sun_az_deg', 'sun_el_deg', 'supply_v',
     'az_moves', 'az_degrees', 'az_stalls', 'az_overcurrent', 'az_reversals',
-    'el_moves', 'el_degrees', 'el_stalls', 'el_overcurrent', 'el_reversals'];
+    'el_moves', 'el_degrees', 'el_stalls', 'el_overcurrent', 'el_reversals',
+    'panel_v', 'light_pct', 'ldr_tl', 'ldr_tr', 'ldr_bl', 'ldr_br', 'base_locked'];
 
   /* NOAA's approximation, the same one the old simulator used */
   function sun(ms, lat, lon) {
@@ -878,6 +889,15 @@ input.scrub::-moz-range-thumb{width:14px;height:14px;border-radius:50%;backgroun
 
   var num = function (v) { return typeof v === 'number' && isFinite(v) ? v : null; };
 
+  /* the solar reading over recent samples: A2 takes at most 3.3 V, and a swing
+     this large with steady light usually means a loose wire */
+  window.hwSolar = function (list) {
+    var v = list.filter(function (x) { return num(x) !== null; });
+    if (!v.length) return { v: null, lo: null, hi: null, unsteady: false, pinned: false };
+    var now = v[v.length - 1], lo = Math.min.apply(null, v), hi = Math.max.apply(null, v);
+    return { v: now, lo: lo, hi: hi, unsteady: hi - lo > 0.6, pinned: now >= 3.2 };
+  };
+
   function pack(tr, rows) {
     var cols = { dt: [], mode: [], fault: [] }, faults = [''], modes = MODES.slice(), prev = null, t0 = null, fw = null;
     NUM_COLS.forEach(function (c) { cols[c] = []; });
@@ -906,6 +926,11 @@ input.scrub::-moz-range-thumb{width:14px;height:14px;border-radius:50%;backgroun
       var e = s.env || {};
       cols.panel_w.push(num(e.panel_w)); cols.irradiance_wm2.push(num(e.irradiance_wm2));
       cols.wind_ms.push(num(e.wind_ms)); cols.ambient_c.push(num(e.ambient_c));
+      cols.panel_v.push(num(e.panel_v)); cols.light_pct.push(num(e.light_pct));
+      var ldr = e.ldr || {};
+      ['tl', 'tr', 'bl', 'br'].forEach(function (c) { cols['ldr_' + c].push(num(ldr[c])); });
+      var dev = s.device || {};
+      cols.base_locked.push(dev.base_locked === true ? 1 : dev.base_locked === false ? 0 : null);
       var sp = sun(t * 1000, tr.lat, tr.lon); cols.sun_az_deg.push(sp[0]); cols.sun_el_deg.push(sp[1]);
       var az = (s.axes || {}).az || {}; cols.supply_v.push(num(az.supply_v));
     });
@@ -1090,7 +1115,8 @@ function unpack(id) {
     el_temp: c.el_temp_c[i], el_mv: c.el_moving_s[i], el_moves: c.el_moves[i],
     el_deg: c.el_degrees[i], el_stalls: c.el_stalls[i], el_oc: c.el_overcurrent[i], el_rev: c.el_reversals[i],
     watt: c.panel_w[i], irr: c.irradiance_wm2[i], wind: c.wind_ms[i],
-    amb: c.ambient_c[i], sun_az: c.sun_az_deg[i], sun_el: c.sun_el_deg[i], volt: c.supply_v[i]
+    amb: c.ambient_c[i], sun_az: c.sun_az_deg[i], sun_el: c.sun_el_deg[i], volt: c.supply_v[i],
+    panel_v: c.panel_v[i], ldr: [c.ldr_tl[i], c.ldr_tr[i], c.ldr_bl[i], c.ldr_br[i]], base_locked: c.base_locked[i]
   });
   }
   return rows;
@@ -2571,32 +2597,39 @@ function renderTrajectory() {
 }
 
 /* ── energy flow ─────────────────────────────────────────────────── */
-var EF = { i: null, timer: null, built: false };
+var EF = { i: null, timer: null, built: false, live: true };
 var EF_N = {
-  sun:  { x: 30,   y: 60,  w: 170, h: 120, t: 'Sun' },
-  arr:  { x: 280,  y: 50,  w: 230, h: 140, t: 'Solar array', click: 'status' },
-  out:  { x: 600,  y: 70,  w: 190, h: 100, t: 'Array output' },
-  bat:  { x: 30,   y: 330, w: 210, h: 130, t: 'Battery pack · 6 × AA' },
-  sw:   { x: 320,  y: 350, w: 130, h: 90,  t: 'Switch' },
-  bus:  { x: 530,  y: 330, w: 200, h: 130, t: 'Breadboard bus' },
-  giga: { x: 820,  y: 190, w: 230, h: 110, t: 'Arduino Giga R1' },
-  sens: { x: 810,  y: 380, w: 170, h: 100, t: 'Current sensor' },
-  az:   { x: 1060, y: 330, w: 160, h: 96,  t: 'Azimuth motor', click: 'health' },
-  el:   { x: 1060, y: 446, w: 160, h: 96,  t: 'Elevation motor', click: 'health' }
+  sun:  { x: 30,   y: 110, w: 160, h: 120, t: 'Sun' },
+  arr:  { x: 270,  y: 30,  w: 240, h: 130, t: 'Solar array · 2 × 2', click: 'twin' },
+  ldr:  { x: 270,  y: 180, w: 240, h: 130, t: 'Light sensors · 4 LDRs', click: 'twin' },
+  giga: { x: 640,  y: 90,  w: 250, h: 170, t: 'Arduino Giga R1', click: 'status' },
+  bat:  { x: 30,   y: 400, w: 240, h: 130, t: 'Battery pack · 6 × AA', click: 'twin' },
+  hb:   { x: 640,  y: 400, w: 250, h: 130, t: 'L298N H-bridge', click: 'twin' },
+  el:   { x: 1010, y: 320, w: 200, h: 110, t: 'Elevation motor', click: 'twin' },
+  az:   { x: 1010, y: 450, w: 200, h: 110, t: 'Base motor', click: 'twin' }
 };
+/* id, path, colour, kind: dotted "read" lines carry a signal, never power */
 var EF_P = [
-  ['light', 'M200 120 H280', 'var(--ink-2)'],
-  ['pv',    'M510 120 H600', 'var(--accent)'],
-  ['b1',    'M240 395 H320', 'var(--good)'],
-  ['b2',    'M450 395 H530', 'var(--good)'],
-  ['giga',  'M730 365 H770 V245 H820', 'var(--ink-2)'],
-  ['b4',    'M730 425 H810', 'var(--good)'],
-  ['paz',   'M980 420 H1020 V378 H1060', 'var(--az)'],
-  ['pel',   'M980 440 H1020 V494 H1060', 'var(--el)']
+  ['lightA', 'M190 150 H230 V95 H270',   'var(--sun)',    'flow'],
+  ['lightL', 'M190 190 H230 V245 H270',  'var(--sun)',    'flow'],
+  ['readA',  'M510 95 H560 V125 H640',   'var(--ink-2)', 'read'],
+  ['readL',  'M510 245 H560 V175 H640',  'var(--ink-2)', 'read'],
+  ['pwrH',   'M270 465 H640',            'var(--good)',   'flow'],
+  ['pwrG',   'M600 465 V235 H640',       'var(--good)',   'flow'],
+  ['ctl',    'M765 260 V400',            'var(--ink-2)', 'read'],
+  ['pel',    'M890 440 H950 V375 H1010', 'var(--el)',     'flow'],
+  ['paz',    'M890 490 H950 V505 H1010', 'var(--az)',     'flow']
 ];
 function efBuild() {
-  var h = '<path class="ghost" d="M395 190 V262 H135 V330"/><text class="tag" x="150" y="254">charging path · not in the parts list</text>';
-  EF_P.forEach(function (p) { h += '<path class="casing" id="efc-' + p[0] + '" d="' + p[1] + '" stroke="' + p[2] + '"/><path class="core" id="efp-' + p[0] + '" d="' + p[1] + '" stroke="' + p[2] + '"/>'; });
+  var h = '';
+  EF_P.forEach(function (p) {
+    if (p[3] === 'flow') h += '<path class="casing" id="efc-' + p[0] + '" d="' + p[1] + '" stroke="' + p[2] + '"/>';
+    h += '<path class="core' + (p[3] === 'read' ? ' read' : '') + '" id="efp-' + p[0] + '" d="' + p[1] + '" stroke="' + p[2] + '"/>';
+  });
+  [[516, 84, 'reading only'], [516, 264, 'reading only'], [400, 453, 'power'], [610, 335, 'power'], [775, 335, 'direction signals'],
+   [30, 382, 'The array is only measured. It does not charge the pack.']].forEach(function (a) {
+    h += '<text class="tag" x="' + a[0] + '" y="' + a[1] + '">' + a[2] + '</text>';
+  });
   Object.keys(EF_N).forEach(function (k) {
     var b = EF_N[k];
     h += '<g class="node' + (b.click ? ' click' : '') + '" data-k="' + k + '" transform="translate(' + b.x + ' ' + b.y + ')">' +
@@ -2605,9 +2638,17 @@ function efBuild() {
       '<text class="nv" x="16" y="' + (b.h - 30) + '"><tspan id="efv-' + k + '">—</tspan><tspan class="nu" dx="5" id="efu-' + k + '"></tspan></text>' +
       '<text class="ns" x="16" y="' + (b.h - 12) + '" id="efs-' + k + '"></text></g>';
   });
+  /* the break in the base motor's line, shown while it is unplugged */
+  h += '<g id="efCut" stroke="var(--crit)" stroke-width="3" stroke-linecap="round"><path d="M972 497 l14 14 M986 497 l-14 14"/></g>';
+  /* key */
+  [[80, 'var(--sun)', 'Light', 0], [108, 'var(--good)', 'Power', 0], [136, 'var(--ink-2)', 'Reading or signal', 1]].forEach(function (a) {
+    h += '<path d="M960 ' + a[0] + ' H1000" fill="none" stroke="' + a[1] + '" stroke-width="' + (a[3] ? 2.5 : 6) + '" stroke-linecap="round"' + (a[3] ? ' stroke-dasharray="4 9"' : '') + '/>' +
+      '<text class="lg" x="1012" y="' + (a[0] + 4) + '">' + a[2] + '</text>';
+  });
+  h += '<text class="tag" x="960" y="170">Moving lines are active now</text>';
   /* tiny glyphs: sun disc, 2x2 array */
-  h += '<circle cx="168" cy="92" r="10" fill="var(--sun)"/><circle cx="168" cy="92" r="16" fill="var(--sun)" opacity=".15"/>';
-  for (var i = 0; i < 2; i++) for (var j = 0; j < 2; j++) h += '<rect x="' + (458 + i * 21) + '" y="' + (72 + j * 13) + '" width="19" height="11" rx="1.5" fill="#1b2a4a" stroke="var(--line-2)"/>';
+  h += '<circle cx="158" cy="142" r="10" fill="var(--sun)"/><circle cx="158" cy="142" r="16" fill="var(--sun)" opacity=".15"/>';
+  for (var i = 0; i < 2; i++) for (var j = 0; j < 2; j++) h += '<rect x="' + (452 + i * 21) + '" y="' + (46 + j * 13) + '" width="19" height="11" rx="1.5" fill="#1b2a4a" stroke="var(--line-2)"/>';
   var svg = $('efSvg'); svg.innerHTML = h;
   svg.querySelectorAll('.node.click').forEach(function (g) { g.onclick = function () { show(EF_N[g.dataset.k].click); }; });
   EF.built = true;
@@ -2620,64 +2661,72 @@ function efPipe(id, frac) {
   var cs = $('efc-' + id); if (cs) cs.classList.toggle('idle', !on);
   if (on) el.style.setProperty('--d', clamp(1.6 / (0.12 + Math.min(1, frac)), 0.7, 9).toFixed(2) + 's');
 }
+/* the corners that report, and the average of them */
+function efLight(r) {
+  var names = ['TL', 'TR', 'BL', 'BR'], on = [], parts = [];
+  r.ldr.forEach(function (v, i) { if (v != null) on.push(v); parts.push(names[i] + ' ' + (v == null ? 'off' : n(v, 0))); });
+  return { count: on.length, avg: on.length ? on.reduce(function (a, b) { return a + b; }, 0) / on.length : null, text: parts.join(' · ') };
+}
+function efSolar(rows, i) { return window.hwSolar(rows.slice(Math.max(0, i - 29), i + 1).map(function (x) { return x.panel_v; })); }
 function efShow(i) {
   var rows = view; if (!rows.length) return;
   i = clamp(i, 0, rows.length - 1); EF.i = i;
-  var r = rows[i], pAz = r.az_cur * r.volt, pEl = r.el_cur * r.volt, on = r.volt > 5;
-  var eff = r.irr > 30 ? r.watt / (r.irr * 4 * 0.110 * 0.060) * 100 : null;
-  efSet('sun', n(r.irr, 0), 'W/m²', r.sun_el > 0 ? 'sun ' + n(r.sun_el, 1) + '° up' : 'below the horizon');
-  efSet('arr', n(r.watt, 2), 'W', eff === null ? 'no light' : n(eff, 1) + '% effective');
-  efSet('out', n(r.watt, 2), 'W', 'metered at the array');
-  efSet('bat', n(r.volt, 2), 'V', 'supplying ' + n(pAz + pEl, 1) + ' W to the motors');
-  efSet('sw', on ? 'ON' : 'OFF', '', 'inferred from pack');
-  efSet('bus', n(r.az_cur + r.el_cur, 2), 'A', n(r.volt, 2) + ' V rail');
-  efSet('giga', (r.mode || '—').toUpperCase(), '', 'draw not metered');
-  efSet('sens', n(r.az_cur + r.el_cur, 2), 'A', 'both channels');
-  efSet('az', n(pAz, 1), 'W', n(r.az_cur, 2) + ' A');
-  efSet('el', n(pEl, 1), 'W', n(r.el_cur, 2) + ' A');
-  efPipe('light', r.irr / 1000); efPipe('pv', r.watt / 4);
-  var mot = (pAz + pEl) / 25;
-  efPipe('b1', on ? mot : 0); efPipe('b2', on ? mot : 0); efPipe('b4', on ? mot : 0);
-  efPipe('giga', on ? 0.05 : 0); efPipe('paz', pAz / 20); efPipe('pel', pEl / 20);
+  var r = rows[i], sol = efSolar(rows, i), lit = efLight(r), locked = r.base_locked === 1;
+  /* the newest sample only counts as "now" while the board is still reporting */
+  var live = i < rows.length - 1 || Date.now() - r.t < 60000;
+  var elOn = live && r.el_mv > 0, azOn = live && !locked && r.az_mv > 0, moving = elOn || azOn;
+  efSet('sun', n(r.sun_el, 0) + '°', '', r.sun_el > 0 ? 'above the horizon' : 'below the horizon');
+  efSet('arr', n(sol.v, 2), 'V', sol.v == null ? 'no reading yet' : sol.pinned ? 'at the 3.3 V limit of pin A2' : sol.unsteady ? 'jumping · check the A2 wire' : 'measured on pin A2');
+  efSet('ldr', n(lit.avg, 0), '%', lit.count ? lit.text : 'no reading yet');
+  efSet('giga', (r.mode || '—').toUpperCase(), '', live ? 'reads sensors, commands the H-bridge' : 'last heard ' + hhmm(r.t));
+  efSet('bat', r.volt != null ? n(r.volt, 2) : '7.2', r.volt != null ? 'V' : 'V nominal', r.volt != null ? 'measured' : 'actual voltage not measured');
+  efSet('hb', moving ? 'DRIVING' : 'IDLE', '', moving ? (elOn && azOn ? 'both motors' : elOn ? 'elevation motor' : 'base motor') : 'motor current not measured');
+  efSet('el', n(r.el_pos, 1), '°', elOn ? 'moving' : 'holding');
+  if (locked) efSet('az', 'Unplugged', '', 'locked while the glue cures');
+  else efSet('az', n(r.az_pos, 1), '°', azOn ? 'moving' : 'holding');
+  efPipe('lightA', live && sol.v > 0.05 ? 0.5 : 0); efPipe('lightL', live && lit.avg > 1 ? 0.5 : 0);
+  efPipe('readA', live && sol.v != null ? 0.4 : 0); efPipe('readL', live && lit.count ? 0.4 : 0);
+  efPipe('pwrG', live ? 0.2 : 0); efPipe('pwrH', moving ? 0.7 : 0); efPipe('ctl', moving ? 0.5 : 0);
+  efPipe('pel', elOn ? 0.7 : 0); efPipe('paz', azOn ? 0.7 : 0);
+  $('efp-paz').classList.toggle('cut', locked); $('efc-paz').classList.toggle('cut', locked);
+  $('efCut').style.display = locked ? '' : 'none';
   setText('efT', dayShort(r.t) + ' ' + hhmm(r.t));
   setText('efWhen', 'Showing ' + dayShort(r.t) + ' at ' + hhmm(r.t) + (i === rows.length - 1 ? ' · latest sample' : ''));
   var sc = $('efScrub'); if (sc && +sc.value !== i) sc.value = i;
 }
 function efStop() { if (EF.timer) { clearInterval(EF.timer); EF.timer = null; } var b = $('efPlay'); if (b) { b.setAttribute('aria-pressed', 'false'); b.textContent = 'Play the day'; } }
 function renderEnergy() {
-  var none = !HAS.power && !HAS.cur && !HAS.volt, sec = document.querySelector('[data-view="energy"]');
+  var none = !view.length, sec = document.querySelector('[data-view="energy"]');
   sec.querySelector('.ef').hidden = none; $('efKpi').hidden = none;
   var nb = $('efNone'); if (!nb) { nb = el('div'); nb.id = 'efNone'; sec.insertBefore(nb, sec.firstChild); }
-  nb.innerHTML = none ? notWired('Where the power goes', 'array output, pack voltage and motor current') : '';
+  nb.innerHTML = none ? notWired('Where the power goes', 'solar and light sensor readings') : '';
   if (none) return;
   if (!EF.built) efBuild();
   var rows = view, sc = $('efScrub');
   sc.max = rows.length - 1;
-  /* open on the brightest moment of the most recent day, so the flow is visible */
-  if (EF.i === null || EF.i > rows.length - 1) {
-    var best = rows.length - 1, bw = -1, from = Math.max(0, rows.length - 1440);
-    for (var j = from; j < rows.length; j++) if (rows[j].watt > bw) { bw = rows[j].watt; best = j; }
-    EF.i = best;
-  }
+  /* follows the newest sample until someone scrubs back */
+  if (EF.live || EF.i === null || EF.i > rows.length - 1) EF.i = rows.length - 1;
   efShow(EF.i);
-  sc.oninput = function () { efStop(); efShow(+sc.value); };
-  $('efNow').onclick = function () { efStop(); efShow(rows.length - 1); };
+  sc.oninput = function () { efStop(); EF.live = +sc.value >= view.length - 1; efShow(+sc.value); };
+  $('efNow').onclick = function () { efStop(); EF.live = true; efShow(view.length - 1); };
   $('efPlay').onclick = function () {
     if (EF.timer) { efStop(); return; }
+    EF.live = false;
     var b = $('efPlay'); b.setAttribute('aria-pressed', 'true'); b.textContent = 'Pause';
     EF.timer = setInterval(function () { efShow(EF.i >= view.length - 1 ? 0 : EF.i + 4); }, 60);
   };
-  /* window totals for the KPI strip */
-  var dtH = STEP / 3600e3, wh = 0, mwh = 0, pk = 0, vmin = Infinity, faults = 0;
-  rows.forEach(function (r) { wh += r.watt * dtH; mwh += (r.az_cur + r.el_cur) * r.volt * dtH; if (r.watt > pk) pk = r.watt; if (r.volt < vmin) vmin = r.volt; if (r.faults.length) faults++; });
+  /* window totals for the KPI strip: only what the board really measures */
+  var hi = null, elS = 0, azS = 0, r = rows[rows.length - 1], sol = efSolar(rows, rows.length - 1), lit = efLight(r);
+  rows.forEach(function (x) { if (x.panel_v != null && (hi === null || x.panel_v > hi)) hi = x.panel_v; elS += x.el_mv || 0; azS += x.az_mv || 0; });
   var k = function (lbl, v, u, col) { return '<div class="kpi" style="border-left-color:' + col + '"><div class="k">' + lbl + '</div><div class="v">' + v + (u ? '<small>' + u + '</small>' : '') + '</div></div>'; };
   $('efKpi').innerHTML =
-    k('Status', LAST.mode === 'fault' ? 'Fault' : 'OK', '', LAST.mode === 'fault' ? 'var(--crit)' : 'var(--good)') +
-    k('Harvested', n(wh, 1), 'Wh', 'var(--accent)') +
-    k('Motors used', n(mwh, 1), 'Wh', 'var(--az)') +
-    k('Peak array', n(pk, 2), 'W', 'var(--sun)') +
-    k('Lowest pack', n(vmin, 2), 'V', vmin < 6.6 ? 'var(--crit)' : 'var(--good)') +
-    k('Fault samples', faults, '', faults ? 'var(--crit)' : 'var(--good)');
+    k('Solar reading', n(sol.v, 2), 'V', sol.unsteady || sol.pinned ? 'var(--warn)' : 'var(--accent)') +
+    k('Highest solar', n(hi, 2), 'V', 'var(--sun)') +
+    k('Light on sensors', n(lit.avg, 0), '%', 'var(--sun)') +
+    k('Sensors connected', lit.count, 'of 4', lit.count === 4 ? 'var(--good)' : 'var(--warn)') +
+    k('Elevation motor ran', n(elS, 0), 's', 'var(--el)') +
+    (r.base_locked === 1 ? k('Base motor', 'Off', 'unplugged', 'var(--warn)') : k('Base motor ran', n(azS, 0), 's', 'var(--az)')) +
+    k('Pack voltage', '—', 'not measured', 'var(--muted)');
 }
 
 /* ── the single tracker ──────────────────────────────────────────── */
@@ -2881,8 +2930,8 @@ function devPaint() {
       row('Wi-Fi signal', d.rssi_dbm != null ? d.rssi_dbm + ' dBm' : '&mdash;') + row('IP address', esc(d.ip || '—')) +
       row('Sample #', s.seq != null ? s.seq : '&mdash;') +
       /* the sensors read higher when darker; shown by corner as seen from the front of the panel */
-      row('Light sensors (raw, higher = darker)', 'TL ' + (a.A0 != null ? a.A0 : '–') + ' · TR ' + (a.A2 != null ? a.A2 : '–') +
-        ' · BL ' + (a.A3 != null ? a.A3 : '–') + ' · BR ' + (a.A1 != null ? a.A1 : '–')) +
+      row('Light sensors (raw, higher = darker)', 'TL ' + (a.A3 != null ? a.A3 : '–') + ' · TR ' + (a.A0 != null ? a.A0 : '–') +
+        ' · BL ' + (a.A1 != null ? a.A1 : '–') + ' · BR ' + (a.A4 != null ? a.A4 : '–')) +
       ((s.env || {}).light_pct != null ? row('Light level', s.env.light_pct + ' %') : '') +
       (d.tracking ? row('Light tracking', d.tracking === 'off' ? 'off (press Auto to follow the light)' : esc(d.tracking)) : '') +
       (s.axes && s.axes.az && s.axes.az.pos_deg != null ? row('Position', 'az ' + s.axes.az.pos_deg.toFixed(1) + '° · el ' + s.axes.el.pos_deg.toFixed(1) + '°' + (d.position ? ' (' + esc(d.position) + ')' : '')) : '') +
@@ -3135,7 +3184,7 @@ var SUBS = {
   status:  'Live readings and the headline wear signal',
   health:  'Per-axis condition, scored against the commissioning baseline',
   trends:  'Five measurements across the selected window',
-  energy:  'Live power through the array, pack, bus and motors',
+  energy:  'How power and readings move through the tracker',
   events:  'Faults, wind stows, and telemetry gaps',
   control: 'Manual commands and the safety interlocks that gate them',
   team:    'Who can see this tracker, and who gets a text when something goes wrong'
@@ -4171,10 +4220,10 @@ function partStatus(k, i){
 
   /* a part whose readings the tracker does not send yet says so */
   const sent = c => C[c] && C[c].some(v => v != null);
-  const NEEDS = {panel:[["panel_w","irradiance_wm2"],"array output and irradiance"], battery:[["supply_v"],"pack voltage"],
+  const NEEDS = {panel:[["panel_w","irradiance_wm2","panel_v"],"the solar panel reading"], battery:[["supply_v"],"pack voltage"],
     azMotor:[["az_current_a","az_temp_c","az_pos_deg","az_moves"],"azimuth motor readings"], elMotor:[["el_current_a","el_temp_c","el_pos_deg","el_moves"],"elevation motor readings"],
     yoke:[["az_pos_deg"],"azimuth position"], holder:[["el_pos_deg"],"elevation position"], shaft:[["az_moves"],"azimuth motion counters"],
-    base:[["wind_ms"],"wind speed"], ldr:[["irradiance_wm2"],"irradiance"], switch:[["supply_v"],"pack voltage"],
+    base:[["wind_ms"],"wind speed"], ldr:[["irradiance_wm2","ldr_tl","ldr_tr","ldr_bl","ldr_br"],"light sensor readings"], switch:[["supply_v"],"pack voltage"],
     sensor:[["az_current_a","el_current_a"],"motor current"]};
   if(NEEDS[k] && !NEEDS[k][0].some(sent)){
     out.head = "Not wired yet"; out.live = true;
@@ -4184,6 +4233,21 @@ function partStatus(k, i){
 
   switch(k){
     case "panel": {
+      if(!sent("panel_w")){
+        /* no current sensor: the voltage the Giga reads on A2 is all there is */
+        const sol = window.hwSolar(C.panel_v.slice(Math.max(0,i-29), i+1));
+        out.live = true;
+        out.tier = sol.v==null ? "na" : sol.pinned || sol.unsteady ? "warn" : "good";
+        out.head = sol.v==null ? "No reading" : fx(sol.v,2)+" V";
+        out.unit = sol.v==null ? "" : "on Giga pin A2";
+        out.rows = [["Recent low", fx(sol.lo,2)+" V"], ["Recent high", fx(sol.hi,2)+" V"],
+          ["Reading", sol.v==null ? "—" : sol.pinned ? "At the pin limit" : sol.unsteady ? "Jumping" : "Steady"],
+          ["Power output", "Not measured"], ["Charges the pack", "No, reading only"]];
+        out.note = sol.pinned ? "The pin is at its 3.3 V limit, so the array may be higher than this. Add a voltage divider before putting it in brighter light."
+          : sol.unsteady ? "The reading is swinging widely. If the light is steady, check the A2 wire and the array's ground connection."
+          : "The Giga reads the array on pin A2, which takes up to 3.3 V. Showing watts needs a current sensor.";
+        break;
+      }
       const cosT = (sunUp && irr > 30)
         ? dot3(vec(C.az_pos_deg[i], C.el_pos_deg[i]), vec(C.sun_az_deg[i], C.sun_el_deg[i])) : null;
       const eff  = irr > 30 ? C.panel_w[i] / (irr * ARRAY_M2) : null;
@@ -4205,6 +4269,12 @@ function partStatus(k, i){
       break; }
     case "azMotor": case "elMotor": {
       const ax = k==="azMotor" ? "az" : "el";
+      if(ax==="az" && C.base_locked[i]===1){
+        out.live = true; out.tier = "warn"; out.head = "Unplugged"; out.unit = "locked while the glue cures";
+        out.rows = [["Last known azimuth", fx(C.az_pos_deg[i],1)+"°"], ["Move commands", "Refused by the board"]];
+        out.note = "The board will not drive this motor until the lock is removed from the firmware.";
+        break;
+      }
       if(!sent(ax+"_current_a")){
         /* no current sensor yet: what the motor's encoder says, which is
            where the axis is, whether it is moving, and its lifetime counters */
@@ -4254,6 +4324,22 @@ function partStatus(k, i){
       out.note = "Wind loading only. The base is not instrumented for strain.";
       break; }
     case "ldr":
+      if(["tl","tr","bl","br"].some(c => sent("ldr_"+c))){
+        const L = [["tl","Top left"],["tr","Top right"],["bl","Bottom left"],["br","Bottom right"]].map(([c,name]) => ({name, v:C["ldr_"+c][i]}));
+        const on = L.filter(x => x.v!=null), off = L.filter(x => x.v==null);
+        out.live = true;
+        out.tier = on.length===4 ? "good" : on.length ? "warn" : "na";
+        out.head = on.length ? fx(on.reduce((a,x) => a+x.v, 0)/on.length,0)+"%" : "No reading";
+        out.unit = on.length ? "average light" : "";
+        out.html = `<div class="tw-ldr">${L.map(x => x.v==null
+          ? `<div class="off"><span>${x.name}</span><b>Unplugged</b><i></i></div>`
+          : `<div><span>${x.name}</span><b>${fx(x.v,0)}%</b><i><u style="width:${Math.max(0,Math.min(100,x.v))}%"></u></i></div>`).join("")}</div>`;
+        out.rows = [["Connected", on.length+" of 4"],
+          ["Brightest", on.length ? on.reduce((a,x) => x.v>a.v ? x : a).name : "—"]];
+        out.note = "Percent of each sensor's full range, not a calibrated light level." +
+          (off.length ? " "+off.map(x => x.name).join(", ")+(off.length>1 ? " are" : " is")+" unplugged, so tracking uses the other sensors." : "");
+        break;
+      }
       out.tier = sunUp ? "good" : "na";
       out.head = fx(irr,0)+" W/m²"; out.unit = "irradiance seen by the sensor";
       out.rows = [["Sun elevation", fx(C.sun_el_deg[i],1)+"°"], ["Sun above horizon", sunUp ? "yes" : "no"]];
@@ -4424,7 +4510,7 @@ function renderInsp(force){
   }
   box.dataset.empty = "";
   const d = PART_BY[SEL], s = partStatus(SEL, idx);
-  const sig = SEL+"|"+s.tier+"|"+s.head+"|"+s.rows.map(r=>r[1]).join("|");
+  const sig = SEL+"|"+s.tier+"|"+s.head+"|"+s.rows.map(r=>r[1]).join("|")+"|"+(s.html||"");
   const spark = SPARK[SEL] && !s.live;     /* a recorded-week sparkline under live readings would mislead */
   if(!force && box.dataset.sig===sig){
     if(spark) drawSpark(document.getElementById("twSpark"), TIER_HEX[s.tier], P.cols[SPARK[SEL]], idx);
@@ -4439,6 +4525,7 @@ function renderInsp(force){
     `<span class="tw-badge ${s.tier}">${TIER_WORD[s.tier]}</span>`+
     `<div class="tw-big">${s.head}${s.unit ? `<small>${s.unit}</small>` : ""}</div>`+
     (spark ? `<canvas class="tw-spark" id="twSpark"></canvas>` : "")+
+    (s.html||"")+
     `<dl class="tw-rows">${s.rows.map(r=>`<dt>${r[0]}</dt><dd>${r[1]}</dd>`).join("")}</dl>`+
     `<p class="tw-note">${s.note}</p>`;
   document.getElementById("twBack").onclick = () => setSel(null, true);
@@ -4467,13 +4554,15 @@ function updateCallouts(i){
   if(!CO_ON || !M || !M.anchor || MODE!=="twin") return;
   const C=P.cols, W=host.clientWidth, H=host.clientHeight, lines=[];
   const val = {
-    panel:   [fx(C.panel_w[i],2), "W", C.irradiance_wm2[i]>30 ? fx(C.panel_w[i]/(C.irradiance_wm2[i]*ARRAY_M2)*100,1)+"% eff · "+fx(C.irradiance_wm2[i],0)+" W/m²" : "night"],
+    panel:   !C.panel_w.some(v => v!=null) ? [fx(C.panel_v[i],2), "V", "solar reading · pin A2"] :
+             [fx(C.panel_w[i],2), "W", C.irradiance_wm2[i]>30 ? fx(C.panel_w[i]/(C.irradiance_wm2[i]*ARRAY_M2)*100,1)+"% eff · "+fx(C.irradiance_wm2[i],0)+" W/m²" : "night"],
     /* motors: current and temperature once the sensor is wired; until then the encoder's position */
-    azMotor: C.az_current_a.some(v => v!=null) ? [fx(C.az_current_a[i],2), "A", fx(C.az_temp_c[i],0)+" °C · "+(C.az_moving_s[i]>0?"moving":"holding")]
+    azMotor: C.base_locked[i]===1 ? ["Unplugged", "", "locked while the glue cures"] :
+             C.az_current_a.some(v => v!=null) ? [fx(C.az_current_a[i],2), "A", fx(C.az_temp_c[i],0)+" °C · "+(C.az_moving_s[i]>0?"moving":"holding")]
                                                : [fx(C.az_pos_deg[i],1), "°", "azimuth · "+(C.az_moving_s[i]>0?"moving":"holding")],
     elMotor: C.el_current_a.some(v => v!=null) ? [fx(C.el_current_a[i],2), "A", fx(C.el_temp_c[i],0)+" °C · "+(C.el_moving_s[i]>0?"moving":"holding")]
                                                : [fx(C.el_pos_deg[i],1), "°", "elevation · "+(C.el_moving_s[i]>0?"moving":"holding")],
-    battery: [fx(C.supply_v[i],2), "V", C.supply_v[i]<6.6 ? "low" : "pack voltage"],
+    battery: C.supply_v[i]==null ? ["7.2", "V", "nominal · not measured"] : [fx(C.supply_v[i],2), "V", C.supply_v[i]<6.6 ? "low" : "pack voltage"],
   };
   for(const c of CO){
     const a = c.k==="panel" ? {m:M.tip, c:new THREE.Vector3()} : M.anchor[c.k];
