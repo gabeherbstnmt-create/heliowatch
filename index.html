@@ -245,6 +245,8 @@ input[type=number]:focus{outline:none;border-color:var(--accent)}
 .twinroot .ov.tr{top:22px;right:22px;display:flex;flex-direction:column;align-items:flex-end;gap:7px}
 .twinroot .ov .clock{font-family:var(--mono);font-size:52px;font-weight:300;letter-spacing:-.055em;line-height:1}
 .twinroot .ov .date{font-size:14px;color:var(--ink-2);margin-top:8px}
+.twinroot .ov .clock small{font-size:.34em;letter-spacing:0;margin-left:.25em;font-weight:400;color:var(--ink-2)}
+.twinroot .pill.live.quiet i{background:var(--muted);box-shadow:none;animation:none}
 .twinroot .pill{display:inline-flex;align-items:center;gap:7px;padding:6px 11px;border-radius:9px;font-size:12.5px;font-weight:500;
   background:var(--glass);border:1px solid var(--glass-line);color:var(--ink);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);text-transform:capitalize}
 .twinroot .pill i{width:7px;height:7px;border-radius:50%;background:var(--muted);display:block}
@@ -729,7 +731,7 @@ input.scrub::-moz-range-thumb{width:14px;height:14px;border-radius:50%;backgroun
 </style>
 
 <div class="gate" id="gate" hidden></div>
-<div class="verbadge" id="verBadge" title="HelioWatch 1.0.0, built Nov 18, 2026 from commit fc40081">v1.0.0 · fc40081 · Nov 18, 2026</div>
+<div class="verbadge" id="verBadge" title="HelioWatch 1.0.0, built Nov 19, 2026 from commit 8012d23">v1.0.0 · 8012d23 · Nov 19, 2026</div>
 <div class="app">
 <nav class="rail" id="tabs" aria-label="Sections">
   <div class="mark" title="HelioWatch"><svg width="28" height="28" viewBox="0 0 26 26" aria-hidden="true">
@@ -1195,7 +1197,7 @@ function clamp(v, a, b) { return v < a ? a : v > b ? b : v; }
 function score(v, best, worst) { return clamp(100 * (worst - v) / (worst - best), 0, 100); }
 function n(v, d) { return v === null || v === undefined || isNaN(v) ? '—' : v.toFixed(d === undefined ? 1 : d); }
 function localDate(ms) { return new Date(ms + M.tz_offset * 3600e3); }
-function hhmm(ms) { var d = localDate(ms); return String(d.getUTCHours()).padStart(2, '0') + ':' + String(d.getUTCMinutes()).padStart(2, '0'); }
+function hhmm(ms) { var d = localDate(ms), h = d.getUTCHours(); return ((h + 11) % 12 + 1) + ':' + String(d.getUTCMinutes()).padStart(2, '0') + (h < 12 ? ' AM' : ' PM'); }
 function dayKey(ms) { return localDate(ms).toISOString().slice(0, 10); }
 function dayShort(ms) { var d = localDate(ms); return ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][d.getUTCDay()] + ' ' + (d.getUTCMonth()+1) + '/' + d.getUTCDate(); }
 function el(tag, cls, html) { var e = document.createElement(tag); if (cls) e.className = cls; if (html != null) e.innerHTML = html; return e; }
@@ -2246,6 +2248,8 @@ try { var _d = JSON.parse(localStorage.getItem('hw-trj2') || 'null');
 function trjSave() { try { localStorage.setItem('hw-trj2', JSON.stringify({ pts: TRJ.pts, outside: TRJ.outside, intent: TRJ.intent, tab: TRJ.tab, teachT: TRJ.teachT, q: TRJ.q })); } catch (e) {} }
 function tMin(s) { var m = /^(\d{1,2}):(\d{2})$/.exec(String(s || '').trim()); return m && +m[1] < 24 && +m[2] < 60 ? +m[1] * 60 + +m[2] : null; }
 function minStr(m) { m = Math.round(m); return String(Math.floor(m / 60)).padStart(2, '0') + ':' + String(m % 60).padStart(2, '0'); }
+/* waypoint times stay HH:MM (the tracker parses them); this is for reading */
+function minStr12(m) { m = Math.round(m); var h = Math.floor(m / 60) % 24; return ((h + 11) % 12 + 1) + ':' + String(m % 60).padStart(2, '0') + (h < 12 ? ' AM' : ' PM'); }
 function rowMin(r) { var d = localDate(r.t); return d.getUTCHours() * 60 + d.getUTCMinutes(); }
 function trjSorted(pts) {
   return pts.map(function (p) { return { m: tMin(p.t), az: +p.az, el: +p.el }; })
@@ -2329,7 +2333,7 @@ function trjGen() {
   TRJ.pts = pts;
 }
 function trjSummary() {
-  var q = TRJ.q, h = minStr(q.start) + '–' + minStr(q.end), out = TRJ.outside === 'hold' ? 'holds outside those hours' : 'stows outside those hours';
+  var q = TRJ.q, h = minStr12(q.start) + '–' + minStr12(q.end), out = TRJ.outside === 'hold' ? 'holds outside those hours' : 'stows outside those hours';
   if (q.kind === 'hold') return 'Hold one position · facing ' + compassWord(q.holdAz) + ' (' + Math.round(q.holdAz) + '°) at ' + Math.round(q.holdEl) + '° elevation · ' + h + ' · ' + out;
   return 'Follow the sun · ' + h + (q.maxEl < M.el_range[1] ? ' · never above ' + Math.round(q.maxEl) + '°' : '') +
     (q.every ? ' · moves every ' + (q.every % 60 ? q.every + ' min' : q.every / 60 + ' h') : ' · moves smoothly') +
@@ -3497,7 +3501,12 @@ function startTime(){ // first clear-sky late morning — a meaningful frame at 
   const d0 = localDayStart(T[0]); return d0 + 10.5*3600 - TZ;
 }
 const localDayStart = t => Math.floor((t+TZ)/86400)*86400; // in local-seconds space
-const fmtClock = t => { const d = new Date((t+TZ)*1000); return d.toISOString().slice(11,16); };
+const fmtClock = t => { const d = new Date((t+TZ)*1000), h = d.getUTCHours(); return `${(h+11)%12+1}:${String(d.getUTCMinutes()).padStart(2,"0")} ${h<12?"AM":"PM"}`; };
+/* the big clock: same 12-hour time, with AM/PM set small beside it */
+const fmtClockBig = t => { const c = fmtClock(t).split(" "); return `${c[0]}<small>${c[1]}</small>`; };
+/* Live mode follows the newest reading; once the tracker has been quiet this
+   long the clock shows the real time instead and says when it went quiet */
+const LIVE_STALE_S = 120;
 const DOW = ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"], MON=["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
 const fmtDate = t => { const d = new Date((t+TZ)*1000); return `${DOW[d.getUTCDay()]} ${MON[d.getUTCMonth()]} ${d.getUTCDate()}`; };
 const fmtShort = t => { const d = new Date((t+TZ)*1000); return `${DOW[d.getUTCDay()]} ${d.getUTCMonth()+1}/${d.getUTCDate()}`; };
@@ -4197,7 +4206,10 @@ function frame(now){
 }
 function updateUi(i,s){
   const C=P.cols;
-  $("clk").textContent=fmtClock(simT); $("dte").textContent=fmtDate(simT);
+  const quiet = LIVE && N && Date.now()/1000 - T[N-1] > LIVE_STALE_S, shown = quiet ? Date.now()/1000 : simT;
+  $("clk").innerHTML=fmtClockBig(shown);
+  $("dte").textContent=fmtDate(shown) + (quiet ? ` · tracker offline since ${DOW[new Date((T[N-1]+TZ)*1000).getUTCDay()]} ${fmtClock(T[N-1])}` : "");
+  const lp=$("livePill"); if(lp && LIVE){ lp.classList.toggle("quiet", !!quiet); lp.lastChild.textContent = quiet ? "Offline" : "Live"; }
   const mp=$("modePill"), m=s.stowed&&s.mode==="auto"?"stow":s.mode; mp.className="pill "+m; mp.lastElementChild.textContent=m;
   const fp=$("faultPill"); const fl=s.fault&&s.fault!=="wind_stow"?s.fault.replace(/;/g," · ").replace(/_/g," "):""; fp.hidden=!fl; fp.className="pill fault"; fp.textContent=fl;
   const err = s.sel>0 ? deg(Math.acos(clamp(s.cosI,-1,1))) : null;
