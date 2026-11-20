@@ -731,7 +731,7 @@ input.scrub::-moz-range-thumb{width:14px;height:14px;border-radius:50%;backgroun
 </style>
 
 <div class="gate" id="gate" hidden></div>
-<div class="verbadge" id="verBadge" title="HelioWatch 1.0.0, built Nov 19, 2026 from commit 8012d23">v1.0.0 · 8012d23 · Nov 19, 2026</div>
+<div class="verbadge" id="verBadge" title="HelioWatch 1.0.0, built Nov 19, 2026 from commit 676e65f">v1.0.0 · 676e65f · Nov 19, 2026</div>
 <div class="app">
 <nav class="rail" id="tabs" aria-label="Sections">
   <div class="mark" title="HelioWatch"><svg width="28" height="28" viewBox="0 0 26 26" aria-hidden="true">
@@ -2763,14 +2763,23 @@ function efShow(i) {
   var live = i < rows.length - 1 || Date.now() - r.t < 60000;
   var elOn = live && r.el_mv > 0, azOn = live && !locked && r.az_mv > 0, moving = elOn || azOn;
   efSet('sun', n(r.sun_el, 0) + '°', '', r.sun_el > 0 ? 'above the horizon' : 'below the horizon');
-  efSet('arr', n(sol.v, 2), 'V', sol.v == null ? 'no reading yet' : sol.pinned ? 'at the 3.3 V limit of pin A2' : sol.unsteady ? 'jumping · check the A2 wire' : 'measured on pin A2');
-  efSet('ldr', n(lit.avg, 0), '%', lit.count ? lit.text : 'no reading yet');
+  /* the newest sample from a board that has gone quiet is not a reading of now */
+  var gone = !live, since = 'no reading since ' + dayShort(r.t) + ' ' + hhmm(r.t);
+  if (gone) { efSet('arr', 'Offline', '', since); efSet('ldr', 'Offline', '', since); }
+  else {
+    efSet('arr', n(sol.v, 2), 'V', sol.v == null ? 'no reading yet' : sol.pinned ? 'at the 3.3 V limit of pin A2' : sol.unsteady ? 'jumping · check the A2 wire' : 'measured on pin A2');
+    efSet('ldr', n(lit.avg, 0), '%', lit.count ? lit.text : 'no reading yet');
+  }
   efSet('giga', (r.mode || '—').toUpperCase(), '', live ? 'reads sensors, commands the H-bridge' : 'last heard ' + hhmm(r.t));
-  efSet('bat', r.volt != null ? n(r.volt, 2) : '7.2', r.volt != null ? 'V' : 'V nominal', r.volt != null ? 'measured' : 'actual voltage not measured');
+  if (gone && r.volt != null) efSet('bat', 'Offline', '', since);
+  else efSet('bat', r.volt != null ? n(r.volt, 2) : '7.2', r.volt != null ? 'V' : 'V nominal', r.volt != null ? 'measured' : 'actual voltage not measured');
   efSet('hb', moving ? 'DRIVING' : 'IDLE', '', moving ? (elOn && azOn ? 'both motors' : elOn ? 'elevation motor' : 'base motor') : 'motor current not measured');
+  if (gone) { efSet('el', 'Offline', '', since); efSet('az', 'Offline', '', since); }
+  else {
   efSet('el', n(r.el_pos, 1), '°', elOn ? 'moving' : 'holding');
   if (locked) efSet('az', 'Unplugged', '', 'locked while the glue cures');
   else efSet('az', n(r.az_pos, 1), '°', azOn ? 'moving' : 'holding');
+  }
   efPipe('lightA', live && sol.v > 0.05 ? 0.5 : 0); efPipe('lightL', live && lit.avg > 1 ? 0.5 : 0);
   efPipe('readA', live && sol.v != null ? 0.4 : 0); efPipe('readL', live && lit.count ? 0.4 : 0);
   efPipe('pwrG', live ? 0.2 : 0); efPipe('pwrH', moving ? 0.7 : 0); efPipe('ctl', moving ? 0.5 : 0);
@@ -2778,7 +2787,7 @@ function efShow(i) {
   $('efp-paz').classList.toggle('cut', locked); $('efc-paz').classList.toggle('cut', locked);
   $('efCut').style.display = locked ? '' : 'none';
   setText('efT', dayShort(r.t) + ' ' + hhmm(r.t));
-  setText('efWhen', 'Showing ' + dayShort(r.t) + ' at ' + hhmm(r.t) + (i === rows.length - 1 ? ' · latest sample' : ''));
+  setText('efWhen', 'Showing ' + dayShort(r.t) + ' at ' + hhmm(r.t) + (gone ? ' · tracker offline since then' : i === rows.length - 1 ? ' · latest sample' : ''));
   var sc = $('efScrub'); if (sc && +sc.value !== i) sc.value = i;
 }
 function efStop() { if (EF.timer) { clearInterval(EF.timer); EF.timer = null; } var b = $('efPlay'); if (b) { b.setAttribute('aria-pressed', 'false'); b.textContent = 'Play the day'; } }
@@ -3507,6 +3516,8 @@ const fmtClockBig = t => { const c = fmtClock(t).split(" "); return `${c[0]}<sma
 /* Live mode follows the newest reading; once the tracker has been quiet this
    long the clock shows the real time instead and says when it went quiet */
 const LIVE_STALE_S = 120;
+const trackerQuiet = () => LIVE && N > 0 && Date.now()/1000 - T[N-1] > LIVE_STALE_S;
+const lastHeard = () => `${DOW[new Date((T[N-1]+TZ)*1000).getUTCDay()]} ${fmtClock(T[N-1])}`;
 const DOW = ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"], MON=["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
 const fmtDate = t => { const d = new Date((t+TZ)*1000); return `${DOW[d.getUTCDay()]} ${MON[d.getUTCMonth()]} ${d.getUTCDate()}`; };
 const fmtShort = t => { const d = new Date((t+TZ)*1000); return `${DOW[d.getUTCDay()]} ${d.getUTCMonth()+1}/${d.getUTCDate()}`; };
@@ -4208,7 +4219,7 @@ function updateUi(i,s){
   const C=P.cols;
   const quiet = LIVE && N && Date.now()/1000 - T[N-1] > LIVE_STALE_S, shown = quiet ? Date.now()/1000 : simT;
   $("clk").innerHTML=fmtClockBig(shown);
-  $("dte").textContent=fmtDate(shown) + (quiet ? ` · tracker offline since ${DOW[new Date((T[N-1]+TZ)*1000).getUTCDay()]} ${fmtClock(T[N-1])}` : "");
+  $("dte").textContent=fmtDate(shown) + (quiet ? ` · tracker offline since ${lastHeard()}` : "");
   const lp=$("livePill"); if(lp && LIVE){ lp.classList.toggle("quiet", !!quiet); lp.lastChild.textContent = quiet ? "Offline" : "Live"; }
   const mp=$("modePill"), m=s.stowed&&s.mode==="auto"?"stow":s.mode; mp.className="pill "+m; mp.lastElementChild.textContent=m;
   const fp=$("faultPill"); const fl=s.fault&&s.fault!=="wind_stow"?s.fault.replace(/;/g," · ").replace(/_/g," "):""; fp.hidden=!fl; fp.className="pill fault"; fp.textContent=fl;
@@ -4389,6 +4400,14 @@ const scoreTier = s => s>=85 ? "good" : s>=70 ? "warn" : s>=50 ? "serious" : "cr
 function partStatus(k, i){
   const C = P.cols, meta = P.meta, H = window.hwCtx;
   const out = {tier:"na", head:"Not monitored", unit:"", rows:[], note:""};
+  /* live sensor readings mean nothing once the tracker has gone quiet: say so
+     instead of holding up its last numbers as if they were current */
+  const READS = {panel:1, ldr:1, battery:1, switch:1, sensor:1, azMotor:1, elMotor:1, yoke:1, holder:1, shaft:1};
+  if(READS[k] && i === N-1 && trackerQuiet()){
+    out.live = true; out.head = "Offline"; out.unit = "no reading";
+    out.note = `The tracker has sent nothing since ${lastHeard()}, so there is no current reading. It fills in again once the tracker is back on power and Wi-Fi.`;
+    return out;
+  }
   const supply = C.supply_v[i], irr = C.irradiance_wm2[i], sunUp = C.sun_el_deg[i] > 0;
   const tMs = T[i]*1000;
   const axh = ax => ({h: H.health(ax, tMs), s: H.stats(ax, tMs)});
@@ -4728,7 +4747,8 @@ const _cv=new THREE.Vector3();
 function updateCallouts(i){
   if(!CO_ON || !M || !M.anchor || MODE!=="twin") return;
   const C=P.cols, W=host.clientWidth, H=host.clientHeight, lines=[];
-  const val = {
+  const off = i === N-1 && trackerQuiet() ? ["Offline", "", "no reading since " + lastHeard()] : null;
+  const val = off ? {panel:off, azMotor:off, elMotor:off, battery:off} : {
     panel:   !C.panel_w.some(v => v!=null) ? [fx(C.panel_v[i],2), "V", "solar reading · pin A2"] :
              [fx(C.panel_w[i],2), "W", C.irradiance_wm2[i]>30 ? fx(C.panel_w[i]/(C.irradiance_wm2[i]*ARRAY_M2)*100,1)+"% eff · "+fx(C.irradiance_wm2[i],0)+" W/m²" : "night"],
     /* motors: current and temperature once the sensor is wired; until then the encoder's position */
